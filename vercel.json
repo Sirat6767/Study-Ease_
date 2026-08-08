@@ -1,5 +1,4 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
@@ -11,7 +10,7 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api|uploads|assets|.*\\..*).*)",
+      "source": "/((?!api|uploads).*)",
       "destination": "/index.html"
     }
   ]

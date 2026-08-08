@@ -1,4 +1,5 @@
 const { supabase, supabaseAdmin } = require('../supabaseClient');
+const academicHierarchyService = require('../services/academicHierarchyService');
 
 const register = async (req, res) => {
   try {
@@ -21,18 +22,26 @@ const register = async (req, res) => {
 
     const userId = authData.user.id;
 
-    // Insert into public.users
-    await supabaseAdmin.from('users').insert({
-      id: userId,
-      email,
-      role: 'student'
-    });
+    try {
+      const { error: userInsertErr } = await supabaseAdmin.from('users').insert({
+        id: userId,
+        email,
+        role: 'student'
+      });
 
-    // Insert into public.personal_info
-    await supabaseAdmin.from('personal_info').insert({
-      user_id: userId,
-      name: name || email.split('@')[0]
-    });
+      if (userInsertErr) throw userInsertErr;
+
+      const { error: infoInsertErr } = await supabaseAdmin.from('personal_info').insert({
+        user_id: userId,
+        name: name ? String(name).trim() : email.split('@')[0]
+      });
+
+      if (infoInsertErr) throw infoInsertErr;
+    } catch (dbErr) {
+      console.error('Registration DB insert failed, rolling back Auth user:', dbErr);
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      return res.status(500).json({ ok: false, error: 'Registration failed. Please try again.' });
+    }
 
     res.json({ ok: true, message: 'Account created. You can sign in now.' });
   } catch (err) {
@@ -52,7 +61,7 @@ const bootstrap = async (req, res) => {
     // Fetch user details
     const { data: userRow, error: userError } = await supabase
       .from('users')
-      .select('id, email, role, personal_info(name)')
+      .select('id, email, role, personal_info(name, avatar_url)')
       .eq('id', userId)
       .single();
 
@@ -60,13 +69,19 @@ const bootstrap = async (req, res) => {
       return res.status(404).json({ ok: false, error: 'User not found in public.users' });
     }
 
-    // Academic Info
+    // Academic Info traversing Department -> Faculty -> University
     const { data: academicRow } = await supabase
       .from('academic_info')
       .select(`
-        dept_id, batch_id, reg_no,
-        departments(dept_name, dept_code, universities(uni_name, uni_code)),
-        batches(batch_name)
+        department_id, batch_id, reg_no,
+        departments!inner(
+          id, department_code, department_name,
+          faculties!inner(
+            id, faculty_code, faculty_name,
+            universities!inner(id, university_code, university_name)
+          )
+        ),
+        batches!inner(id, batch_name)
       `)
       .eq('user_id', userId)
       .single();
@@ -75,16 +90,7 @@ const bootstrap = async (req, res) => {
     let pendingRequest = null;
 
     if (academicRow) {
-      academic = {
-        deptId: academicRow.dept_id,
-        batchId: academicRow.batch_id,
-        regNo: academicRow.reg_no,
-        deptName: academicRow.departments.dept_name,
-        deptCode: academicRow.departments.dept_code,
-        uniName: academicRow.departments.universities.uni_name,
-        uniCode: academicRow.departments.universities.uni_code,
-        batchName: academicRow.batches.batch_name
-      };
+      academic = academicHierarchyService.formatAcademicObject(academicRow);
     } else {
       // Check pending request
       const { data: reqRow } = await supabase
@@ -94,7 +100,7 @@ const bootstrap = async (req, res) => {
         .order('requested_at', { ascending: false })
         .limit(1)
         .single();
-        
+
       if (reqRow) {
         pendingRequest = { id: reqRow.id, batchId: reqRow.batch_id, status: reqRow.status, message: reqRow.message };
       }
@@ -103,29 +109,44 @@ const bootstrap = async (req, res) => {
     // Personal Tasks
     const { data: tasks } = await supabase
       .from('tasks')
-      .select('id, name, done, priority, due_date')
+      .select('id, name, done, priority, due_date, file_url, file_name, archived')
       .eq('user_id', userId)
+      .eq('archived', false)
       .order('due_date', { ascending: true })
       .order('id', { ascending: true });
 
-    const formattedTasks = tasks ? tasks.map(t => ({
+    // Archived tasks
+    const { data: archivedTasks } = await supabase
+      .from('tasks')
+      .select('id, name, done, priority, due_date, file_url, file_name, archived')
+      .eq('user_id', userId)
+      .eq('archived', true)
+      .order('id', { ascending: false })
+      .limit(50);
+
+    const mapTask = (t) => ({
       id: t.id,
       name: t.name,
       done: t.done,
       priority: t.priority,
-      dueDate: t.due_date
-    })) : [];
+      dueDate: t.due_date,
+      fileUrl: t.file_url || null,
+      fileName: t.file_name || null,
+      archived: t.archived || false
+    });
 
-    // Initialize arrays
+    const formattedTasks = tasks ? tasks.map(mapTask) : [];
+    const formattedArchivedTasks = archivedTasks ? archivedTasks.map(mapTask) : [];
+
     let exams = [];
     let enrollments = [];
     let courseFiles = [];
     let notices = [];
 
     if (academic) {
-      const batchId = academic.batchId;
+      const batchId = academic.batch.id;
 
-      // Enrollments and Grade Components
+      // Enrollments
       const { data: enrollData } = await supabase
         .from('student_enrollments')
         .select(`
@@ -141,10 +162,10 @@ const bootstrap = async (req, res) => {
         enrollments = enrollData.map(e => ({
           enrollId: e.id,
           courseId: e.course_id,
-          code: e.courses.course_code,
-          title: e.courses.course_name,
-          creditHours: e.courses.credit_hours,
-          components: e.grade_components.map(g => ({
+          code: e.courses?.course_code,
+          title: e.courses?.course_name,
+          creditHours: e.courses?.credit_hours,
+          components: (e.grade_components || []).map(g => ({
             id: g.id,
             type: g.type,
             name: g.name,
@@ -164,7 +185,6 @@ const bootstrap = async (req, res) => {
         .eq('batch_id', batchId)
         .order('exam_date', { ascending: true });
 
-      // We only want exams for courses the user is enrolled in
       const enrolledCourseIds = enrollments.map(e => e.courseId);
       
       if (examData) {
@@ -173,7 +193,7 @@ const bootstrap = async (req, res) => {
           .map(ex => ({
             id: ex.id,
             courseId: ex.course_id,
-            courseCode: ex.courses.course_code,
+            courseCode: ex.courses?.course_code,
             name: ex.name,
             date: ex.exam_date,
             time: ex.exam_time,
@@ -182,7 +202,23 @@ const bootstrap = async (req, res) => {
           }));
       }
 
-      // Notices
+      if (enrolledCourseIds.length > 0) {
+        const { data: fileData } = await supabase
+          .from('course_files')
+          .select('id, course_id, file_name, file_url, file_type')
+          .in('course_id', enrolledCourseIds);
+
+        if (fileData) {
+          courseFiles = fileData.map(f => ({
+            id: f.id,
+            courseId: f.course_id,
+            name: f.file_name,
+            url: f.file_url,
+            type: f.file_type
+          }));
+        }
+      }
+
       const { data: noticeData } = await supabase
         .from('notices')
         .select('*')
@@ -193,18 +229,22 @@ const bootstrap = async (req, res) => {
       if (noticeData) notices = noticeData;
     }
 
+    const pi = Array.isArray(userRow.personal_info) ? userRow.personal_info[0] : userRow.personal_info;
+
     res.json({
       ok: true,
       user: {
         id: userId,
         email: userRow.email,
         role: userRow.role,
-        name: userRow.personal_info?.[0]?.name || userRow.email
+        name: pi?.name || null,
+        avatarUrl: pi?.avatar_url || null
       },
       academic,
       pendingRequest,
       exams,
       tasks: formattedTasks,
+      archivedTasks: formattedArchivedTasks,
       enrollments,
       courseFiles,
       notices

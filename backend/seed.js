@@ -1,13 +1,8 @@
 /**
  * StudyEase Supabase Seed Script (Node.js)
  * ==========================================
- * Migrated from seed.php — creates 3 universities, departments,
- * batches, courses, users (via Supabase Auth Admin), and sample data.
- *
- * Usage:
- *   node seed.js
- *
- * NOTE: Run only ONCE on a fresh database.
+ * Creates universities, faculties, departments, batches, courses, users,
+ * and realistic multi-faculty academic hierarchy sample data.
  */
 
 require('dotenv').config();
@@ -21,208 +16,220 @@ if (!supabaseUrl || !serviceKey) {
   process.exit(1);
 }
 
-// Use Service Role key — bypasses all RLS, required for admin operations
 const supabase = createClient(supabaseUrl, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
 
-// ─── Helper: create user in Supabase Auth + public.users + personal_info ──────
 async function createUser(email, password, role, name) {
-  // 1. Create in Supabase Auth
+  let userId;
   const { data: authData, error: authError } = await supabase.auth.admin.createUser({
     email,
     password,
-    email_confirm: true  // skip email verification for seed
+    email_confirm: true
   });
 
   if (authError) {
-    // If user already exists, fetch their ID
-    if (authError.message.includes('already been registered')) {
-      console.log(`  ⚠️  ${email} already exists, skipping auth creation.`);
+    if (authError.message.includes('already been registered') || authError.message.includes('already registered')) {
       const { data: { users } } = await supabase.auth.admin.listUsers();
-      const existing = users.find(u => u.email === email);
+      const existing = users?.find(u => u.email === email);
       if (!existing) throw new Error(`Cannot find existing user: ${email}`);
-      return existing.id;
+      userId = existing.id;
+    } else {
+      throw new Error(`Auth error for ${email}: ${authError.message}`);
     }
-    throw new Error(`Auth error for ${email}: ${authError.message}`);
+  } else {
+    userId = authData.user.id;
   }
 
-  const userId = authData.user.id;
-
-  // 2. Insert into public.users
-  await supabase.from('users').insert({ id: userId, email, role });
-
-  // 3. Insert into public.personal_info
-  await supabase.from('personal_info').insert({ user_id: userId, name });
-
+  await supabase.from('users').upsert({ id: userId, email, role }, { onConflict: 'id' });
+  await supabase.from('personal_info').upsert({ user_id: userId, name }, { onConflict: 'user_id' });
   return userId;
 }
 
-// ─── Main Seed Function ────────────────────────────────────────────────────────
-async function seed() {
-  console.log('\n🌱 Starting StudyEase seed...\n');
+async function getOrCreateUni(code, name) {
+  const { data: all } = await supabase.from('universities').select('*');
+  const found = all?.find(u => (u.university_code || u.uni_code) === code);
+  if (found) return found;
 
-  // Guard: skip if already seeded
-  const { count } = await supabase.from('universities').select('*', { count: 'exact', head: true });
-  if (count > 0) {
-    console.log('⚠️  Database already has data. Skipping seed to avoid duplicates.');
-    console.log('   If you want to re-seed, clear the database first.\n');
-    process.exit(0);
+  const { data: created, error } = await supabase.from('universities').insert({ university_code: code, university_name: name }).select().single();
+  if (error) {
+    const { data: createdFallback, error: err2 } = await supabase.from('universities').insert({ uni_code: code, uni_name: name }).select().single();
+    if (err2) {
+      const { data: refetch } = await supabase.from('universities').select('*');
+      const f = refetch?.find(u => (u.university_code || u.uni_code) === code);
+      if (f) return f;
+      throw err2;
+    }
+    return createdFallback;
   }
+  return created;
+}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // 1.  GLOBAL ADMIN
-  // ───────────────────────────────────────────────────────────────────────────
+async function getOrCreateFac(uniId, code, name) {
+  const { data: all } = await supabase.from('faculties').select('*').eq('university_id', uniId);
+  const found = all?.find(f => (f.faculty_name || f.name) === name);
+  if (found) return found;
+
+  const { data: created, error } = await supabase.from('faculties').insert({ university_id: uniId, faculty_code: code, faculty_name: name }).select().single();
+  if (error) {
+    const { data: refetch } = await supabase.from('faculties').select('*').eq('university_id', uniId);
+    const f = refetch?.find(f => (f.faculty_name || f.name) === name);
+    if (f) return f;
+    throw error;
+  }
+  return created;
+}
+
+async function getOrCreateDept(facId, code, name, uniCode) {
+  const { data: all } = await supabase.from('departments').select('*');
+  const found = all?.find(d => (d.department_name || d.dept_name) === name || (d.department_code || d.dept_code) === code);
+  if (found) return found;
+
+  const payload = {
+    faculty_id: facId,
+    department_code: code,
+    department_name: name
+  };
+
+  const { data: created, error } = await supabase.from('departments').insert(payload).select().single();
+  if (error) {
+    const fallbackPayload = { faculty_id: facId, dept_code: code, dept_name: name, uni_code: uniCode };
+    const { data: createdFallback, error: err2 } = await supabase.from('departments').insert(fallbackPayload).select().single();
+    if (err2) {
+      const { data: refetch } = await supabase.from('departments').select('*');
+      const f = refetch?.find(d => (d.department_name || d.dept_name) === name || (d.department_code || d.dept_code) === code);
+      if (f) return f;
+      throw err2;
+    }
+    return createdFallback;
+  }
+  return created;
+}
+
+async function getOrCreateBatch(deptId, name, crUserId = null) {
+  const { data: all } = await supabase.from('batches').select('*');
+  const found = all?.find(b => (b.department_id === deptId || b.dept_id === deptId) && (b.batch_name || b.name) === name);
+  if (found) {
+    if (crUserId) await supabase.from('batches').update({ cr_user_id: crUserId }).eq(found.id ? 'id' : 'batch_id', found.id || found.batch_id);
+    return found;
+  }
+  
+  const { data: created, error } = await supabase.from('batches').insert({ department_id: deptId, batch_name: name, cr_user_id: crUserId }).select().single();
+  if (error) {
+    const { data: createdFallback, error: err2 } = await supabase.from('batches').insert({ dept_id: deptId, batch_name: name, cr_user_id: crUserId }).select().single();
+    if (err2) {
+      const { data: refetch } = await supabase.from('batches').select('*');
+      const f = refetch?.find(b => (b.department_id === deptId || b.dept_id === deptId) && (b.batch_name || b.name) === name);
+      if (f) return f;
+      throw err2;
+    }
+    return createdFallback;
+  }
+  return created;
+}
+
+async function seed() {
+  console.log('\n🌱 Starting StudyEase multi-faculty seed...\n');
+
+  // 1. GLOBAL ADMIN
   console.log('👤 Creating admin user...');
-  const adminId = await createUser('admin@studyease.com', 'Admin@1234', 'admin', 'Admin Sam');
+  await createUser('admin@studyease.com', 'Admin@1234', 'admin', 'Admin Sam');
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // UNIVERSITY 1: SSTU
-  // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n🏛️  University 1: SSTU...');
+  // 2. UNIVERSITY 1: SSTU
+  console.log('\n🏛️  University 1: SSTU (State Science and Technology University)...');
+  const sstu = await getOrCreateUni('SSTU', 'State Science and Technology University');
+  const sstuCode = sstu.university_code || sstu.uni_code || 'SSTU';
 
-  await supabase.from('universities').insert({ uni_code: 'SSTU', uni_name: 'State Science and Technology University' });
+  const facScience  = await getOrCreateFac(sstu.id, 'FSCI', 'Faculty of Science');
+  const facBusiness = await getOrCreateFac(sstu.id, 'FBUS', 'Faculty of Business');
 
-  const { data: sstDept } = await supabase.from('departments').insert({
-    dept_code: 'CSE', dept_name: 'Computer Science and Engineering', uni_code: 'SSTU'
-  }).select().single();
+  const deptCSE  = await getOrCreateDept(facScience.id, 'CSE', 'Computer Science & Engineering', sstuCode);
+  const deptMath = await getOrCreateDept(facScience.id, 'MATH', 'Mathematics', sstuCode);
+  const deptAcc  = await getOrCreateDept(facBusiness.id, 'ACC', 'Accounting', sstuCode);
 
-  // Users
   const modId     = await createUser('mod@sstu.edu',        'Mod@1234', 'university_moderator', 'Prof. Moderator');
   const crId      = await createUser('cr@studyease.com',    'Cr@12345', 'cr',                   'CR Jordan');
   const stuId1    = await createUser('test@studyease.com',  'Test@1234','student',               'Alex Student');
   const stuPendId = await createUser('alice@studyease.com', 'Alice@123','student',               'Alice Pending');
 
-  // Moderator link
-  await supabase.from('university_moderators').insert({ user_id: modId, uni_code: 'SSTU' });
+  await supabase.from('university_moderators').upsert({ user_id: modId, university_id: sstu.id }, { onConflict: 'user_id,university_id' });
 
-  // Batch
-  const { data: batch1 } = await supabase.from('batches').insert({
-    batch_name: 'CSE-2023', dept_id: sstDept.dept_id, cr_user_id: crId
-  }).select().single();
+  const batch1 = await getOrCreateBatch(deptCSE.id || deptCSE.dept_id, 'CSE-2023', crId);
+  await getOrCreateBatch(deptMath.id || deptMath.dept_id, 'MATH-2024');
+  await getOrCreateBatch(deptAcc.id || deptAcc.dept_id, 'ACC-2023');
 
-  // Academic info (CR + Student)
-  await supabase.from('academic_info').insert([
-    { user_id: crId,   dept_id: sstDept.dept_id, batch_id: batch1.batch_id, reg_no: 'REG-CR-001' },
-    { user_id: stuId1, dept_id: sstDept.dept_id, batch_id: batch1.batch_id, reg_no: 'REG-ST-002' }
-  ]);
+  const batch1Id = batch1.id || batch1.batch_id;
+  const deptCSEId = deptCSE.id || deptCSE.dept_id;
 
-  // Pending join request for Alice
-  await supabase.from('batch_join_requests').insert({
-    user_id: stuPendId, batch_id: batch1.batch_id, reg_no: 'REG-ST-003',
-    message: 'Please approve my request!'
-  });
+  await supabase.from('academic_info').upsert([
+    { user_id: crId,   department_id: deptCSEId, batch_id: batch1Id, reg_no: 'REG-CR-001' },
+    { user_id: stuId1, department_id: deptCSEId, batch_id: batch1Id, reg_no: 'REG-ST-002' }
+  ], { onConflict: 'user_id' });
+
+  await supabase.from('batch_join_requests').upsert({
+    user_id: stuPendId, batch_id: batch1Id, reg_no: 'REG-ST-003', message: 'Please approve my request!'
+  }, { onConflict: 'user_id,batch_id' });
 
   // Courses
-  const { data: c1 } = await supabase.from('courses').insert({
-    course_code: 'CSE201', course_name: 'Data Structures', batch_id: batch1.batch_id, credit_hours: 3.0
-  }).select().single();
+  const { data: c1 } = await supabase.from('courses').upsert({ course_code: 'CSE201', course_name: 'Data Structures', batch_id: batch1Id, credit_hours: 3.0 }, { onConflict: 'course_code,batch_id' }).select().single();
+  const { data: c2 } = await supabase.from('courses').upsert({ course_code: 'EEE202', course_name: 'Digital Electronics', batch_id: batch1Id, credit_hours: 3.0 }, { onConflict: 'course_code,batch_id' }).select().single();
 
-  const { data: c2 } = await supabase.from('courses').insert({
-    course_code: 'EEE202', course_name: 'Digital Electronics', batch_id: batch1.batch_id, credit_hours: 3.0
-  }).select().single();
+  if (c1 && c2) {
+    await supabase.from('student_enrollments').upsert([
+      { user_id: crId,   course_id: c1.course_id, batch_id: batch1Id },
+      { user_id: crId,   course_id: c2.course_id, batch_id: batch1Id },
+      { user_id: stuId1, course_id: c1.course_id, batch_id: batch1Id },
+      { user_id: stuId1, course_id: c2.course_id, batch_id: batch1Id }
+    ], { onConflict: 'user_id,course_id' });
 
-  // Enrollments
-  await supabase.from('student_enrollments').insert([
-    { user_id: crId,   course_id: c1.course_id, batch_id: batch1.batch_id },
-    { user_id: crId,   course_id: c2.course_id, batch_id: batch1.batch_id },
-    { user_id: stuId1, course_id: c1.course_id, batch_id: batch1.batch_id },
-    { user_id: stuId1, course_id: c2.course_id, batch_id: batch1.batch_id }
-  ]);
+    const { data: enrollments } = await supabase.from('student_enrollments').select('id, course_id').eq('user_id', stuId1);
+    const enroll1 = enrollments?.find(e => e.course_id === c1.course_id);
+    const enroll2 = enrollments?.find(e => e.course_id === c2.course_id);
 
-  // Get enrollment IDs for grade components
-  const { data: enrollments } = await supabase.from('student_enrollments')
-    .select('id, course_id').eq('user_id', stuId1);
-
-  const enroll1 = enrollments.find(e => e.course_id === c1.course_id);
-  const enroll2 = enrollments.find(e => e.course_id === c2.course_id);
-
-  // Grade Components
-  await supabase.from('grade_components').insert([
-    { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'attendance', name: 'Attendance',  max_marks: 10,  obtained: 8.5  },
-    { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'ct',         name: 'CT-1',        max_marks: 15,  obtained: 12.0 },
-    { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'final',      name: 'Final Exam',  max_marks: 50,  obtained: 40.0 },
-    { enrollment_id: enroll2.id, course_id: c2.course_id, type: 'midterm',    name: 'Midterm',     max_marks: 30,  obtained: 25.0 }
-  ]);
-
-  // Exams
-  await supabase.from('exams').insert([
-    { course_id: c1.course_id, batch_id: batch1.batch_id, created_by: crId, name: 'Data Structures Final',      exam_date: '2026-06-15', exam_time: '09:00:00', venue: 'Room 301', notes: 'Chapters 1–8' },
-    { course_id: c2.course_id, batch_id: batch1.batch_id, created_by: crId, name: 'Digital Electronics Midterm', exam_date: '2026-05-20', exam_time: '11:00:00', venue: 'Lab B',    notes: 'Logic gates' }
-  ]);
-
-  // Notices
-  await supabase.from('notices').insert([
-    { title: 'Exam Schedule Released', description: 'Check your dashboards for the new schedule.', category: 'exam',  priority: 'high',   posted_by: 'CR Jordan', posted_by_user_id: crId, batch_id: batch1.batch_id, is_pinned: true  },
-    { title: 'Class Cancelled',        description: "Today's EEE lab is cancelled.",              category: 'event', priority: 'medium', posted_by: 'CR Jordan', posted_by_user_id: crId, batch_id: batch1.batch_id, is_pinned: false }
-  ]);
-
-  // Tasks
-  await supabase.from('tasks').insert([
-    { user_id: stuId1, name: 'Review Chapter 1',   done: false, priority: 'high',   due_date: '2026-05-10' },
-    { user_id: stuId1, name: 'Submit Assignment 1', done: true,  priority: 'normal', due_date: null         }
-  ]);
-
-  // Course Files
-  await supabase.from('course_files').insert([
-    { course_id: c1.course_id, uploaded_by: crId, file_url: 'https://example.com/slide1.pdf', file_name: 'Lecture 1 Slides', file_type: 'lecture'    },
-    { course_id: c2.course_id, uploaded_by: crId, file_url: 'https://example.com/hw.pdf',     file_name: 'Homework 1',       file_type: 'assignment' }
-  ]);
+    if (enroll1 && enroll2) {
+      await supabase.from('grade_components').upsert([
+        { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'attendance', name: 'Attendance',  max_marks: 10,  obtained: 8.5  },
+        { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'ct',         name: 'CT-1',        max_marks: 15,  obtained: 12.0 },
+        { enrollment_id: enroll1.id, course_id: c1.course_id, type: 'final',      name: 'Final Exam',  max_marks: 50,  obtained: 40.0 },
+        { enrollment_id: enroll2.id, course_id: c2.course_id, type: 'midterm',    name: 'Midterm',     max_marks: 30,  obtained: 25.0 }
+      ], { onConflict: 'enrollment_id,name' });
+    }
+  }
 
   console.log('  ✅ SSTU seeded.');
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // UNIVERSITY 2: BUE
-  // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n🏛️  University 2: BUE...');
-
-  await supabase.from('universities').insert({ uni_code: 'BUE', uni_name: 'Bangladesh University of Engineering' });
-
-  const { data: bueDept } = await supabase.from('departments').insert({
-    dept_code: 'EEE', dept_name: 'Electrical and Electronic Engineering', uni_code: 'BUE'
-  }).select().single();
+  // 3. UNIVERSITY 2: BUE
+  console.log('\n🏛️  University 2: BUE (Bangladesh University of Engineering)...');
+  const bue = await getOrCreateUni('BUE', 'Bangladesh University of Engineering');
+  const bueCode = bue.university_code || bue.uni_code || 'BUE';
+  const bueFacEEE = await getOrCreateFac(bue.id, 'FEEE', 'Faculty of Electrical & Electronic Engineering');
+  const bueDeptEEE = await getOrCreateDept(bueFacEEE.id, 'EEE', 'Electrical and Electronic Engineering', bueCode);
 
   const mod2Id = await createUser('mod2@bue.edu',  'Mod2@1234', 'university_moderator', 'Dr. BUE Moderator');
   const cr2Id  = await createUser('cr2@bue.edu',   'Cr2@12345', 'cr',                   'CR Maya');
   const bStu1  = await createUser('stu1@bue.edu',  'Stu1@1234', 'student',              'Bob EEE');
   const bStu2  = await createUser('stu2@bue.edu',  'Stu2@1234', 'student',              'Sara EEE');
 
-  await supabase.from('university_moderators').insert({ user_id: mod2Id, uni_code: 'BUE' });
+  await supabase.from('university_moderators').upsert({ user_id: mod2Id, university_id: bue.id }, { onConflict: 'user_id,university_id' });
+  const bueBatch = await getOrCreateBatch(bueDeptEEE.id || bueDeptEEE.dept_id, 'EEE-2022', cr2Id);
+  const bueBatchId = bueBatch.id || bueBatch.batch_id;
+  const bueDeptId  = bueDeptEEE.id || bueDeptEEE.dept_id;
 
-  const { data: bueBatch } = await supabase.from('batches').insert({
-    batch_name: 'EEE-2022', dept_id: bueDept.dept_id, cr_user_id: cr2Id
-  }).select().single();
-
-  await supabase.from('academic_info').insert([
-    { user_id: cr2Id, dept_id: bueDept.dept_id, batch_id: bueBatch.batch_id, reg_no: 'BUE-CR-001' },
-    { user_id: bStu1, dept_id: bueDept.dept_id, batch_id: bueBatch.batch_id, reg_no: 'BUE-ST-002' },
-    { user_id: bStu2, dept_id: bueDept.dept_id, batch_id: bueBatch.batch_id, reg_no: 'BUE-ST-003' }
-  ]);
-
-  const { data: bC1 } = await supabase.from('courses').insert({ course_code: 'EEE301', course_name: 'Circuit Analysis',   batch_id: bueBatch.batch_id, credit_hours: 3.0 }).select().single();
-  const { data: bC2 } = await supabase.from('courses').insert({ course_code: 'EEE302', course_name: 'Signals and Systems', batch_id: bueBatch.batch_id, credit_hours: 3.0 }).select().single();
-
-  await supabase.from('student_enrollments').insert([
-    ...[cr2Id, bStu1, bStu2].flatMap(uid => [
-      { user_id: uid, course_id: bC1.course_id, batch_id: bueBatch.batch_id },
-      { user_id: uid, course_id: bC2.course_id, batch_id: bueBatch.batch_id }
-    ])
-  ]);
-
-  await supabase.from('exams').insert({ course_id: bC1.course_id, batch_id: bueBatch.batch_id, created_by: cr2Id, name: 'Circuit Final', exam_date: '2026-07-10', exam_time: '10:00:00', venue: 'Room 201', notes: 'All chapters' });
-  await supabase.from('notices').insert({ title: 'Lab Schedule', description: 'EEE lab sessions start next week.', category: 'event', priority: 'medium', posted_by: 'CR Maya', posted_by_user_id: cr2Id, batch_id: bueBatch.batch_id, is_pinned: false });
+  await supabase.from('academic_info').upsert([
+    { user_id: cr2Id, department_id: bueDeptId, batch_id: bueBatchId, reg_no: 'BUE-CR-001' },
+    { user_id: bStu1, department_id: bueDeptId, batch_id: bueBatchId, reg_no: 'BUE-ST-002' },
+    { user_id: bStu2, department_id: bueDeptId, batch_id: bueBatchId, reg_no: 'BUE-ST-003' }
+  ], { onConflict: 'user_id' });
 
   console.log('  ✅ BUE seeded.');
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // UNIVERSITY 3: NUST
-  // ───────────────────────────────────────────────────────────────────────────
-  console.log('\n🏛️  University 3: NUST...');
-
-  await supabase.from('universities').insert({ uni_code: 'NUST', uni_name: 'National University of Science and Technology' });
-
-  const { data: nustME } = await supabase.from('departments').insert({ dept_code: 'ME', dept_name: 'Mechanical Engineering', uni_code: 'NUST' }).select().single();
-  const { data: nustCS } = await supabase.from('departments').insert({ dept_code: 'CS', dept_name: 'Computer Science',        uni_code: 'NUST' }).select().single();
+  // 4. UNIVERSITY 3: NUST
+  console.log('\n🏛️  University 3: NUST (National University of Science and Technology)...');
+  const nust = await getOrCreateUni('NUST', 'National University of Science and Technology');
+  const nustCode = nust.university_code || nust.uni_code || 'NUST';
+  const nustFacEng = await getOrCreateFac(nust.id, 'FENG', 'Faculty of Engineering');
+  const nustME = await getOrCreateDept(nustFacEng.id, 'ME', 'Mechanical Engineering', nustCode);
+  const nustCS = await getOrCreateDept(nustFacEng.id, 'CS', 'Computer Science', nustCode);
 
   const mod3Id = await createUser('mod3@nust.edu', 'Mod3@1234', 'university_moderator', 'Prof. NUST Admin');
   const cr3Id  = await createUser('cr3@nust.edu',  'Cr3@12345', 'cr',                   'CR Liam');
@@ -230,59 +237,25 @@ async function seed() {
   const nStu1  = await createUser('stu3@nust.edu', 'Stu3@1234', 'student',              'Zara ME');
   const nStu2  = await createUser('stu4@nust.edu', 'Stu4@1234', 'student',              'Aiden CS');
 
-  await supabase.from('university_moderators').insert({ user_id: mod3Id, uni_code: 'NUST' });
+  await supabase.from('university_moderators').upsert({ user_id: mod3Id, university_id: nust.id }, { onConflict: 'user_id,university_id' });
 
-  const { data: nBatch1 } = await supabase.from('batches').insert({ batch_name: 'ME-2023', dept_id: nustME.dept_id, cr_user_id: cr3Id }).select().single();
-  const { data: nBatch2 } = await supabase.from('batches').insert({ batch_name: 'CS-2024', dept_id: nustCS.dept_id, cr_user_id: cr4Id }).select().single();
+  const nBatch1 = await getOrCreateBatch(nustME.id || nustME.dept_id, 'ME-2023', cr3Id);
+  const nBatch2 = await getOrCreateBatch(nustCS.id || nustCS.dept_id, 'CS-2024', cr4Id);
 
-  await supabase.from('academic_info').insert([
-    { user_id: cr3Id, dept_id: nustME.dept_id, batch_id: nBatch1.batch_id, reg_no: 'NUST-ME-001' },
-    { user_id: nStu1, dept_id: nustME.dept_id, batch_id: nBatch1.batch_id, reg_no: 'NUST-ME-002' },
-    { user_id: cr4Id, dept_id: nustCS.dept_id, batch_id: nBatch2.batch_id, reg_no: 'NUST-CS-001' },
-    { user_id: nStu2, dept_id: nustCS.dept_id, batch_id: nBatch2.batch_id, reg_no: 'NUST-CS-002' }
-  ]);
+  const nBatch1Id = nBatch1.id || nBatch1.batch_id;
+  const nBatch2Id = nBatch2.id || nBatch2.batch_id;
+  const nustMEId  = nustME.id || nustME.dept_id;
+  const nustCSId  = nustCS.id || nustCS.dept_id;
 
-  const { data: nC1 } = await supabase.from('courses').insert({ course_code: 'ME401',  course_name: 'Thermodynamics', batch_id: nBatch1.batch_id, credit_hours: 4.0 }).select().single();
-  const { data: nC2 } = await supabase.from('courses').insert({ course_code: 'CS401',  course_name: 'Algorithms',     batch_id: nBatch2.batch_id, credit_hours: 3.0 }).select().single();
-
-  await supabase.from('student_enrollments').insert([
-    { user_id: cr3Id, course_id: nC1.course_id, batch_id: nBatch1.batch_id },
-    { user_id: nStu1, course_id: nC1.course_id, batch_id: nBatch1.batch_id },
-    { user_id: cr4Id, course_id: nC2.course_id, batch_id: nBatch2.batch_id },
-    { user_id: nStu2, course_id: nC2.course_id, batch_id: nBatch2.batch_id }
-  ]);
-
-  await supabase.from('notices').insert([
-    { title: 'Thermo Exam Date Set', description: 'Exam on July 20, Room 101.', category: 'exam',    priority: 'high',   posted_by: 'CR Liam', posted_by_user_id: cr3Id, batch_id: nBatch1.batch_id, is_pinned: true  },
-    { title: 'CS Assignment 1',      description: 'Due Friday midnight via portal.', category: 'general', priority: 'medium', posted_by: 'CR Noah', posted_by_user_id: cr4Id, batch_id: nBatch2.batch_id, is_pinned: false }
-  ]);
+  await supabase.from('academic_info').upsert([
+    { user_id: cr3Id, department_id: nustMEId, batch_id: nBatch1Id, reg_no: 'NUST-ME-001' },
+    { user_id: nStu1, department_id: nustMEId, batch_id: nBatch1Id, reg_no: 'NUST-ME-002' },
+    { user_id: cr4Id, department_id: nustCSId, batch_id: nBatch2Id, reg_no: 'NUST-CS-001' },
+    { user_id: nStu2, department_id: nustCSId, batch_id: nBatch2Id, reg_no: 'NUST-CS-002' }
+  ], { onConflict: 'user_id' });
 
   console.log('  ✅ NUST seeded.');
-
-  // ─── Summary ──────────────────────────────────────────────────────────────
-  console.log(`
-╔══════════════════════════════════════════════════════════════════╗
-║              ✅  Seed Completed Successfully!                    ║
-╠══════════════════════════════════════════════════════════════════╣
-║  All passwords follow the same pattern: FirstLetter@12345       ║
-╠══════════════════════════════════════════════════════════════════╣
-║  ROLE            EMAIL                      PASSWORD            ║
-║  ─────────────────────────────────────────────────────────────  ║
-║  Admin           admin@studyease.com        Admin@1234          ║
-║  ─────────────────────────────────────────────────────────────  ║
-║  Student ✅      test@studyease.com         Test@1234           ║
-║  Student ⏳      alice@studyease.com        Alice@123           ║
-║  ─────────────────────────────────────────────────────────────  ║
-║  CR (SSTU/CSE)   cr@studyease.com           Cr@12345            ║
-║  CR (BUE/EEE)    cr2@bue.edu                Cr2@12345           ║
-║  CR (NUST/ME)    cr3@nust.edu               Cr3@12345           ║
-║  CR (NUST/CS)    cr4@nust.edu               Cr4@12345           ║
-║  ─────────────────────────────────────────────────────────────  ║
-║  Moderator (SSTU) mod@sstu.edu              Mod@1234            ║
-║  Moderator (BUE)  mod2@bue.edu              Mod2@1234           ║
-║  Moderator (NUST) mod3@nust.edu             Mod3@1234           ║
-╚══════════════════════════════════════════════════════════════════╝
-  `);
+  console.log('\n✅ Multi-faculty seed completed successfully!\n');
 }
 
 seed().catch(err => {

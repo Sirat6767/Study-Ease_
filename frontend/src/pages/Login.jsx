@@ -2,15 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, ArrowRight, BookOpen, GraduationCap, Crown, Wrench, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import axios from 'axios';
+import api from '../lib/api';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const DEMO_ACCOUNTS = {
-  student: { email: 'test@studyease.com',  password: 'Test@1234' },
-  cr:      { email: 'cr@studyease.com',    password: 'Cr@12345'  },
-  admin:   { email: 'admin@studyease.com', password: 'Admin@1234' },
-  moderator: { email: 'mod@studyease.com', password: 'Mod@12345' }
+  student:   { email: 'test@studyease.com',  password: 'Test@1234'  },
+  cr:        { email: 'cr@studyease.com',    password: 'Cr@12345'   },
+  moderator: { email: 'mod@studyease.com',   password: 'Mod@12345'  },
+  admin:     { email: 'admin@studyease.com', password: 'Admin@1234' },
 };
 
 const Login = () => {
@@ -20,6 +19,7 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(null);
   const [error, setError] = useState('');
 
   const handleLogin = async (e) => {
@@ -40,9 +40,7 @@ const Login = () => {
       localStorage.setItem('supabase.auth.token', token);
 
       // Check if user needs to join a batch (bootstrap will tell us)
-      const res = await axios.get(`${API_URL}/api/auth/bootstrap`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.get('/api/auth/bootstrap');
 
       if (res.data.ok) {
         const role = res.data.user?.role;
@@ -68,7 +66,7 @@ const Login = () => {
 
     try {
       // Step 1: Create user via our backend (which uses the Admin API)
-      const res = await axios.post(`${API_URL}/api/auth/register`, { email, password, name });
+      const res = await api.post('/api/auth/register', { email, password, name });
 
       if (!res.data.ok) {
         setError(res.data.error || 'Registration failed');
@@ -114,9 +112,7 @@ const Login = () => {
       const token = data.session.access_token;
       localStorage.setItem('supabase.auth.token', token);
 
-      const res = await axios.get(`${API_URL}/api/auth/bootstrap`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.get('/api/auth/bootstrap');
 
       if (res.data.ok) {
         const role = res.data.user?.role;
@@ -158,19 +154,21 @@ const Login = () => {
         </div>
       </div>
 
-      {/* Form Section */}
-      <div className="flex-1 flex items-center justify-center p-10 bg-gradient-to-b from-white to-slate-50 relative overflow-hidden">
+      <div className="flex-1 flex items-center justify-center p-6 md:p-10 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #f0fdfa 0%, #ffffff 50%, #eef2ff 100%)' }}>
+        {/* Decorative background orbs */}
+        <div className="absolute top-[-5%] right-[-5%] w-64 h-64 rounded-full bg-teal-300/20 blur-[80px] pointer-events-none" />
+        <div className="absolute bottom-[-5%] left-[-5%] w-64 h-64 rounded-full bg-indigo-300/15 blur-[80px] pointer-events-none" />
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-teal-600 via-teal-500 to-teal-400"></div>
 
-        <div className="w-full max-w-[460px] relative z-10">
-          <div className="flex items-center gap-4 mb-2">
-            <div className="w-16 h-16 bg-gradient-to-br from-teal-600 to-teal-400 rounded-2xl flex items-center justify-center text-3xl shadow-[0_0_40px_rgba(13,148,136,0.3),0_10px_25px_-5px_rgba(0,0,0,0.1)] relative animate-float">
-              <BookOpen className="text-white w-8 h-8" />
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full border-2 border-white shadow-[0_4px_15px_rgba(245,158,11,0.5)] animate-pulse-slow"></div>
-            </div>
-            <div>
-              <h1 className="font-serif text-4xl font-extrabold bg-gradient-to-r from-teal-600 to-teal-400 text-transparent bg-clip-text tracking-tight">StudyEase</h1>
-              <p className="text-slate-500 font-medium">Your Academic Companion</p>
+        <div className="w-full max-w-[460px] relative z-10 card-modern card-light p-8 sm:p-10 shadow-[0_8px_40px_rgba(15,23,42,0.12)] border-slate-200">
+          <div className="flex items-center gap-4 mb-8">
+            <img src="/logo.png" alt="Study Ease" className="h-16 w-auto object-contain shrink-0" onError={(e) => e.target.style.display='none'} />
+            <div className="flex flex-col justify-center">
+              <h1 className="font-sans text-4xl font-black tracking-tight leading-none">
+                <span className="text-slate-900">Study </span>
+                <span className="text-teal-500">Ease</span>
+              </h1>
+              <p className="text-sm text-slate-500 font-bold tracking-wide mt-1">Simpler learning, better results.</p>
             </div>
           </div>
 
@@ -195,9 +193,10 @@ const Login = () => {
             <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-6">
               {!isLogin && (
                 <div className="space-y-2">
-                  <label className="block font-semibold text-slate-700 text-sm tracking-wide">Full Name</label>
+                  <label htmlFor="full-name" className="block font-semibold text-slate-700 text-sm tracking-wide">Full Name</label>
                   <div className="relative group">
                     <input
+                      id="full-name"
                       type="text"
                       placeholder="Enter your name"
                       className="input-field"
@@ -211,9 +210,10 @@ const Login = () => {
               )}
 
               <div className="space-y-2">
-                <label className="block font-semibold text-slate-700 text-sm tracking-wide">Email Address</label>
+                <label htmlFor="email-address" className="block font-semibold text-slate-700 text-sm tracking-wide">Email Address</label>
                 <div className="relative group">
                   <input
+                    id="email-address"
                     type="email"
                     placeholder="Enter your email"
                     className="input-field"
@@ -226,9 +226,10 @@ const Login = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="block font-semibold text-slate-700 text-sm tracking-wide">Password</label>
+                <label htmlFor="password" className="block font-semibold text-slate-700 text-sm tracking-wide">Password</label>
                 <div className="relative group">
                   <input
+                    id="password"
                     type="password"
                     placeholder={isLogin ? 'Enter your password' : 'Min. 8 characters'}
                     className="input-field"
@@ -253,7 +254,7 @@ const Login = () => {
               </button>
             </form>
 
-            <p className="text-center mt-8 text-slate-500">
+            <p className="text-center mt-8 text-slate-500 font-medium">
               {isLogin ? "Don't have an account? " : 'Already have an account? '}
               <button
                 onClick={() => { setIsLogin(!isLogin); setError(''); }}
@@ -266,12 +267,13 @@ const Login = () => {
             {/* Demo Quick Access */}
             {isLogin && (
               <div className="mt-8 pt-8 border-t border-slate-200">
-                <div className="text-center text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Quick Demo Access</div>
+                <div className="text-center text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Quick Demo Access</div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <button
                     type="button"
                     onClick={() => { setEmail(DEMO_ACCOUNTS.student.email); setPassword(DEMO_ACCOUNTS.student.password); setError(''); }}
                     className="p-3 rounded-xl cursor-pointer transition-all duration-300 border-2 text-center bg-gradient-to-br from-teal-50 to-teal-100 hover:-translate-y-1 hover:shadow-lg border-teal-200"
+                    aria-label="Demo login as Student"
                   >
                     <GraduationCap className="w-6 h-6 mx-auto mb-1 text-teal-700" />
                     <div className="text-xs font-bold text-teal-800">Student</div>
@@ -280,6 +282,7 @@ const Login = () => {
                     type="button"
                     onClick={() => { setEmail(DEMO_ACCOUNTS.cr.email); setPassword(DEMO_ACCOUNTS.cr.password); setError(''); }}
                     className="p-3 rounded-xl cursor-pointer transition-all duration-300 border-2 text-center bg-gradient-to-br from-violet-50 to-violet-100 hover:-translate-y-1 hover:shadow-lg border-violet-200"
+                    aria-label="Demo login as CR"
                   >
                     <Crown className="w-6 h-6 mx-auto mb-1 text-violet-700" />
                     <div className="text-xs font-bold text-violet-800">CR</div>
@@ -288,6 +291,7 @@ const Login = () => {
                     type="button"
                     onClick={() => { setEmail(DEMO_ACCOUNTS.moderator.email); setPassword(DEMO_ACCOUNTS.moderator.password); setError(''); }}
                     className="p-3 rounded-xl cursor-pointer transition-all duration-300 border-2 text-center bg-gradient-to-br from-blue-50 to-blue-100 hover:-translate-y-1 hover:shadow-lg border-blue-200"
+                    aria-label="Demo login as Moderator"
                   >
                     <BookOpen className="w-6 h-6 mx-auto mb-1 text-blue-700" />
                     <div className="text-xs font-bold text-blue-800">Moderator</div>
@@ -296,6 +300,7 @@ const Login = () => {
                     type="button"
                     onClick={() => { setEmail(DEMO_ACCOUNTS.admin.email); setPassword(DEMO_ACCOUNTS.admin.password); setError(''); }}
                     className="p-3 rounded-xl cursor-pointer transition-all duration-300 border-2 text-center bg-gradient-to-br from-slate-100 to-slate-200 hover:-translate-y-1 hover:shadow-lg border-slate-300"
+                    aria-label="Demo login as Admin"
                   >
                     <Wrench className="w-6 h-6 mx-auto mb-1 text-slate-700" />
                     <div className="text-xs font-bold text-slate-800">Admin</div>

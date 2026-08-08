@@ -13,7 +13,8 @@ const getNotifications = async (req, res) => {
     if (error) throw error;
     res.json({ ok: true, notifications: data || [] });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('getNotifications error:', err);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
   }
 };
 
@@ -31,7 +32,8 @@ const markAsRead = async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('markAsRead error:', err);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
   }
 };
 
@@ -47,12 +49,31 @@ const markAllAsRead = async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('markAllAsRead error:', err);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
+  }
+};
+
+const getUnreadCount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_read', false);
+
+    if (error) throw error;
+    res.json({ ok: true, count: count || 0 });
+  } catch (err) {
+    console.error('getUnreadCount error:', err);
+    res.status(500).json({ ok: false, error: 'Internal Server Error' });
   }
 };
 
 module.exports = {
   getNotifications,
   markAsRead,
-  markAllAsRead
+  markAllAsRead,
+  getUnreadCount
 };

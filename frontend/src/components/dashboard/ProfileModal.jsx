@@ -1,25 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { X, User, Book, Save, Loader2 } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
+import api from '../../lib/api';
+import { X, User, Save, Loader2 } from 'lucide-react';
+import AcademicBreadcrumb from '../ui/AcademicBreadcrumb';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
-const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
+const ProfileModal = ({ isOpen, onClose }) => {
+  const { isDarkMode } = useTheme();
   const [activeTab, setActiveTab] = useState('personal');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
   const [personal, setPersonal] = useState({
-    name: '',
-    father_name: '',
-    mother_name: '',
-    contact_no: '',
-    address: ''
+    name: '', father_name: '', mother_name: '', contact_no: '', address: '', avatar_url: ''
   });
-  const [academic, setAcademic] = useState({
-    reg_no: '',
-    dept_name: '',
-    batch_name: ''
-  });
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [academic, setAcademic] = useState(null);
+  const [role, setRole] = useState('student');
+  const [uniName, setUniName] = useState('');
 
   useEffect(() => {
     if (isOpen) fetchProfile();
@@ -28,13 +25,12 @@ const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
   const fetchProfile = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('supabase.auth.token');
-      const res = await axios.get(`${API}/api/student/profile`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.get('/api/student/profile');
       if (res.data.ok) {
+        setRole(res.data.role);
+        setUniName(res.data.uniName || '');
         setPersonal(prev => ({ ...prev, ...res.data.personal }));
-        setAcademic(prev => ({ ...prev, ...res.data.academic }));
+        setAcademic(res.data.academic);
       }
     } catch (err) {
       console.error('Failed to fetch profile');
@@ -47,20 +43,44 @@ const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const token = localStorage.getItem('supabase.auth.token');
-      const res = await axios.put(`${API}/api/student/profile`, {
+      const res = await api.put('/api/student/profile', {
         type: activeTab,
-        data: activeTab === 'personal' ? personal : academic
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
+        data: activeTab === 'personal' ? personal : { reg_no: academic?.regNo }
       });
       if (res.data.ok) {
-        alert('Profile updated successfully!');
+        setSuccessMsg('Profile updated successfully!');
+        setTimeout(() => setSuccessMsg(''), 3000);
+        if (onClose) onClose(true);
       }
     } catch (err) {
       alert('Failed to update profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+
+      const res = await api.post('/api/student/upload-avatar', formData);
+
+      if (res.data.ok) {
+        setPersonal(prev => ({ ...prev, avatar_url: res.data.avatarUrl }));
+        setSuccessMsg('Profile picture updated!');
+        setTimeout(() => setSuccessMsg(''), 3000);
+        if (onClose) onClose(true);
+      }
+    } catch (err) {
+      alert('Failed to upload avatar');
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = '';
     }
   };
 
@@ -77,19 +97,32 @@ const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
       <div className={`w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden border ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-white'}`}>
         {/* Header */}
         <div className={`px-8 py-6 flex justify-between items-center border-b ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-500">
-              <User className="w-6 h-6" />
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              {personal.avatar_url ? (
+                <img src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${personal.avatar_url}`} alt="Avatar" className="w-14 h-14 rounded-full object-cover shadow-md border-2 border-teal-500/20" />
+              ) : (
+                <div className="w-14 h-14 rounded-full bg-teal-500/10 flex items-center justify-center text-teal-500 shadow-md">
+                  <User className="w-7 h-7" />
+                </div>
+              )}
+              <label className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-opacity backdrop-blur-sm">
+                {uploadingAvatar ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <span className="text-white text-[10px] font-bold text-center leading-tight">Change<br/>Photo</span>}
+                <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+              </label>
             </div>
-            <h2 className="text-2xl font-bold">Profile Settings</h2>
+            <div>
+              <h2 className="text-2xl font-bold leading-tight">Profile Settings</h2>
+              <p className="text-xs text-slate-500">Update your photo and info</p>
+            </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+          <button onClick={() => onClose && onClose(false)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
             <X className="w-6 h-6" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex px-8 border-b dark:border-slate-800">
+        <div className="flex px-8 border-b dark:border-slate-800 relative">
           <button 
             onClick={() => setActiveTab('personal')}
             className={`px-6 py-4 font-bold text-sm transition-all relative ${activeTab === 'personal' ? 'text-teal-500' : 'text-slate-500'}`}
@@ -97,13 +130,22 @@ const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
             Personal Info
             {activeTab === 'personal' && <span className="absolute bottom-0 left-0 w-full h-1 bg-teal-500 rounded-t-full"></span>}
           </button>
-          <button 
-            onClick={() => setActiveTab('academic')}
-            className={`px-6 py-4 font-bold text-sm transition-all relative ${activeTab === 'academic' ? 'text-teal-500' : 'text-slate-500'}`}
-          >
-            Academic Info
-            {activeTab === 'academic' && <span className="absolute bottom-0 left-0 w-full h-1 bg-teal-500 rounded-t-full"></span>}
-          </button>
+          {role !== 'admin' && (
+            <button 
+              onClick={() => setActiveTab('academic')}
+              className={`px-6 py-4 font-bold text-sm transition-all relative ${activeTab === 'academic' ? 'text-teal-500' : 'text-slate-500'}`}
+            >
+              {role === 'university_moderator' ? 'University Info' : 'Academic Info'}
+              {activeTab === 'academic' && <span className="absolute bottom-0 left-0 w-full h-1 bg-teal-500 rounded-t-full"></span>}
+            </button>
+          )}
+          
+          {successMsg && (
+            <div className="absolute right-8 top-1/2 -translate-y-1/2 text-sm font-bold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-500/10 px-3 py-1 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-right-2">
+              <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+              {successMsg}
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -140,15 +182,25 @@ const ProfileModal = ({ isOpen, onClose, isDarkMode }) => {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  <div className="p-6 rounded-2xl bg-teal-500/5 border border-teal-500/20">
-                    <p className="text-sm text-teal-600 dark:text-teal-400 font-medium mb-1">Assigned Department & Batch</p>
-                    <h3 className="text-xl font-bold">{academic.dept_name} - {academic.batch_name}</h3>
-                    <p className="text-xs text-slate-500 mt-2 italic">* Department and Batch can only be changed by Admin/Moderator.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-500">Registration / ID Number</label>
-                    <input className={inputClass} value={academic.reg_no} onChange={e => setAcademic({...academic, reg_no: e.target.value})} placeholder="Enter Reg No" />
-                  </div>
+                  {role === 'university_moderator' ? (
+                    <div className="p-6 rounded-2xl bg-teal-500/5 border border-teal-500/20">
+                      <p className="text-sm text-teal-600 dark:text-teal-400 font-medium mb-1">Assigned University</p>
+                      <h3 className="text-xl font-bold">{uniName || 'None'}</h3>
+                      <p className="text-xs text-slate-500 mt-2 italic">* University assignment is managed by Admin.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-6 rounded-2xl bg-teal-500/5 border border-teal-500/20 space-y-3">
+                        <p className="text-xs uppercase tracking-wider text-teal-600 dark:text-teal-400 font-bold">Academic Hierarchy</p>
+                        <AcademicBreadcrumb academic={academic} isDarkMode={isDarkMode} />
+                        <p className="text-xs text-slate-500 pt-2 italic border-t border-slate-200/50 dark:border-slate-800">* Hierarchy can only be changed by Admin/Moderator.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-slate-500">Registration / ID Number</label>
+                        <input className={inputClass} value={academic?.regNo || ''} onChange={e => setAcademic(a => ({ ...a, regNo: e.target.value }))} placeholder="Enter Reg No" />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

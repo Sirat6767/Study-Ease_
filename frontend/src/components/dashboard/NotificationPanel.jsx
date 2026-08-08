@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Bell, Check, Trash2, X, AlertCircle } from 'lucide-react';
-import axios from 'axios';
+import api from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const getToken = async () => {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token || localStorage.getItem('supabase.auth.token');
 };
 
-const NotificationPanel = ({ isOpen, onClose, isDarkMode }) => {
+const NotificationPanel = ({ isOpen, onClose }) => {
+  const { isDarkMode } = useTheme();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -23,8 +24,7 @@ const NotificationPanel = ({ isOpen, onClose, isDarkMode }) => {
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const token = await getToken();
-      const res = await axios.get(`${API}/api/notifications`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await api.get('/api/notifications');
       if (res.data.ok) {
         setNotifications(res.data.notifications);
       }
@@ -37,8 +37,7 @@ const NotificationPanel = ({ isOpen, onClose, isDarkMode }) => {
 
   const markAsRead = async (id) => {
     try {
-      const token = await getToken();
-      await axios.put(`${API}/api/notifications/${id}/read`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      await api.put(`/api/notifications/${id}/read`, {});
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     } catch (e) {
       console.error(e);
@@ -47,8 +46,7 @@ const NotificationPanel = ({ isOpen, onClose, isDarkMode }) => {
 
   const markAllAsRead = async () => {
     try {
-      const token = await getToken();
-      await axios.put(`${API}/api/notifications/read-all`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      await api.put('/api/notifications/read-all', {});
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     } catch (e) {
       console.error(e);

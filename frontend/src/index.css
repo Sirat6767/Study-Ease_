@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     --primary: #0d9488; --primary-light: #14b8a6; --primary-dark: #0f766e;
@@ -21,36 +23,98 @@
   }
 
   body {
-    @apply bg-slate-100 text-slate-800 antialiased min-h-screen overflow-x-hidden;
+    @apply antialiased min-h-screen overflow-x-hidden text-slate-900;
+    background: linear-gradient(135deg, #f1f5f9 0%, #f0fdfa 40%, #eef2ff 100%);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  /* Dark mode body override */
+  .dark body {
+    @apply bg-slate-950 text-white;
+    background: #020617;
+  }
+
+  /* Global Select Option Contrast Rules */
+  select option {
+    color: #0f172a;
+    background-color: #ffffff;
+    font-weight: 600;
+  }
+  .dark select option {
+    color: #f8fafc;
+    background-color: #0f172a;
   }
 }
 
 @layer components {
   .btn {
-    @apply w-full px-7 py-4 bg-[length:200%_200%] text-white border-none rounded-2xl text-lg font-semibold cursor-pointer transition-all duration-300 flex items-center justify-center gap-3 relative overflow-hidden tracking-wide;
-    background-image: var(--gradient-primary);
-  }
-  .btn:hover {
-    @apply -translate-y-1 shadow-[0_15px_40px_rgba(13,148,136,0.4)];
+    @apply w-full px-7 py-3.5 bg-gradient-to-r from-teal-600 to-teal-400 text-white border-none rounded-xl text-base font-bold cursor-pointer transition-all duration-300 flex items-center justify-center gap-3 relative shadow-md tracking-wide hover:-translate-y-0.5 hover:shadow-[0_8px_25px_rgba(13,148,136,0.4)];
   }
   .btn-secondary {
-    @apply bg-slate-100 text-slate-700 !bg-none;
-  }
-  .btn-secondary:hover {
-    @apply bg-slate-200 shadow-md;
+    @apply bg-white text-slate-800 font-bold border border-slate-300 rounded-xl px-7 py-3.5 cursor-pointer transition-all shadow-sm hover:bg-slate-50 hover:border-slate-400 hover:shadow-md hover:-translate-y-0.5;
   }
   .input-field {
-    @apply w-full px-4 py-4 pl-12 border-2 border-slate-200 rounded-2xl text-base transition-all duration-300 bg-white;
+    @apply w-full px-4 py-3.5 pl-12 border-2 border-slate-300 rounded-xl text-sm font-medium transition-all duration-300 bg-white text-slate-900 placeholder-slate-400 shadow-sm focus:outline-none focus:border-teal-500 focus:bg-white focus:ring-4 focus:ring-teal-500/15 focus:-translate-y-[1px] focus:shadow-md;
   }
-  .input-field:focus {
-    @apply outline-none border-teal-600 bg-white shadow-[0_0_0_4px_rgba(13,148,136,0.12),0_10px_25px_-5px_rgba(0,0,0,0.1)] -translate-y-[2px];
+
+  /* ── Light & Dark Mode Cards ────────────────────────────────────── */
+  .card-modern {
+    @apply p-6 rounded-2xl transition-all border;
+  }
+  /* Light: crisp layered card with clean cool-slate border and soft shadow elevation */
+  .card-light {
+    @apply bg-white/95 border-slate-200/90 shadow-[0_4px_20px_rgba(15,23,42,0.06),0_1px_3px_rgba(15,23,42,0.03)];
+  }
+  /* Dark: keeps original treatment */
+  .card-dark {
+    @apply bg-slate-900/80 border-slate-800 backdrop-blur-md shadow-xl shadow-black/20;
+  }
+
+  /* ── List Rows ────────────────────────────────────────────────────── */
+  .list-row-light {
+    @apply bg-white border-slate-200/90 shadow-2xs hover:bg-slate-50/80 hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300;
+  }
+  .list-row-dark {
+    @apply bg-slate-800/60 border-slate-700/50 hover:bg-slate-800 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300;
+  }
+
+  /* ── Stats Bar (light & dark) ────────────────────────────────────────── */
+  .stats-bar-light {
+    @apply bg-gradient-to-r from-teal-50/90 via-white to-indigo-50/90 border-slate-200/90 shadow-sm rounded-2xl;
+  }
+  .stats-bar-dark {
+    @apply bg-slate-800/50 border-slate-700 rounded-2xl;
+  }
+
+  /* ── Section container for sub-cards inside a light card ────────── */
+  .inner-card-light {
+    @apply bg-slate-50/90 border border-slate-200/90 hover:bg-white hover:shadow-sm hover:border-teal-300/80 transition-all rounded-xl;
+  }
+  .inner-card-dark {
+    @apply bg-slate-800/50 border-slate-700/50 hover:bg-slate-800 rounded-xl;
+  }
+
+  /* ── Badges System ──────────────────────────────────────────────────── */
+  .badge-student {
+    @apply bg-slate-100 text-slate-800 border border-slate-200 font-bold px-2.5 py-1 rounded-full text-xs shadow-2xs dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700;
+  }
+  .badge-cr {
+    @apply bg-violet-100 text-violet-800 border border-violet-300/80 font-bold px-2.5 py-1 rounded-full text-xs shadow-2xs dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-700/50;
+  }
+  .badge-moderator {
+    @apply bg-blue-100 text-blue-800 border border-blue-300/80 font-bold px-2.5 py-1 rounded-full text-xs shadow-2xs dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700/50;
+  }
+  .badge-admin {
+    @apply bg-emerald-100 text-emerald-800 border border-emerald-300/80 font-bold px-2.5 py-1 rounded-full text-xs shadow-2xs dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700/50;
   }
 }
 
 /* Base animations that might not be in Tailwind */
 @keyframes float { 0%,100% { transform:translateY(0px) rotate(-5deg); } 50% { transform:translateY(-10px) rotate(-5deg); } }
 @keyframes pulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.05); } }
+@keyframes fade-up { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 
 .animate-float { animation: float 6s ease-in-out infinite; }
 .animate-pulse-slow { animation: pulse 2s ease-in-out infinite; }
+.animate-fade-up { animation: fade-up 0.25s ease-out both; }
+

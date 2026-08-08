@@ -1,31 +1,33 @@
 import { useState, useEffect } from 'react';
-import { LogOut, Hourglass, BookOpen, ArrowRight, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { LogOut, Hourglass, BookOpen, ArrowRight, Loader2, AlertCircle, CheckCircle, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../lib/api';
 import { supabase } from '../lib/supabase';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { useTheme } from '../contexts/ThemeContext';
 
 const LimboPage = () => {
   const navigate = useNavigate();
+  const { isDarkMode } = useTheme();
 
   const [universities, setUniversities] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [batches, setBatches] = useState([]);
+  const [faculties, setFaculties]       = useState([]);
+  const [departments, setDepartments]   = useState([]);
+  const [batches, setBatches]           = useState([]);
 
-  const [selectedUni, setSelectedUni] = useState('');
-  const [selectedDept, setSelectedDept] = useState('');
-  const [selectedBatch, setSelectedBatch] = useState('');
-  const [regNo, setRegNo] = useState('');
-  const [message, setMessage] = useState('');
+  const [selectedUni, setSelectedUni]         = useState('');
+  const [selectedFaculty, setSelectedFaculty] = useState('');
+  const [selectedDept, setSelectedDept]       = useState('');
+  const [selectedBatch, setSelectedBatch]     = useState('');
+  const [regNo, setRegNo]                     = useState('');
+  const [message, setMessage]                 = useState('');
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]       = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [pendingRequest, setPendingRequest] = useState(null);
+  const [error, setError]           = useState('');
+  const [pendingRequest, setPendingRequest]   = useState(null);
   const [rejectedRequest, setRejectedRequest] = useState(null);
-  const [removedRequest, setRemovedRequest] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
+  const [removedRequest, setRemovedRequest]   = useState(null);
+  const [submitted, setSubmitted]   = useState(false);
 
   useEffect(() => {
     checkStatusAndLoadData();
@@ -38,22 +40,17 @@ const LimboPage = () => {
 
       if (!token) { navigate('/login'); return; }
 
-      // Check if user already has a pending request via bootstrap
-      const bootstrap = await axios.get(`${API_URL}/api/auth/bootstrap`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const bootstrap = await api.get('/api/auth/bootstrap');
 
       if (bootstrap.data.ok) {
         const { academic, pendingRequest: pending, user } = bootstrap.data;
 
-        // If already in a batch, go to dashboard
         const isPrivileged = ['admin', 'university_moderator'].includes(user?.role);
         if (isPrivileged || academic) {
           navigate('/dashboard');
           return;
         }
 
-        // If pending or rejected request exists
         if (pending) {
           if (pending.status === 'rejected') {
             if (pending.message === 'SYSTEM:REMOVED') {
@@ -62,23 +59,20 @@ const LimboPage = () => {
               setRejectedRequest(pending);
             }
           } else if (pending.status === 'approved') {
-            // If they have an approved request but are on the Limbo page, 
-            // it means their academic_info was deleted (they were removed).
             setRemovedRequest(pending);
           } else {
             setPendingRequest(pending);
           }
-          setLoading(false);
-          return;
         }
       }
 
-      // Load institutions for the join form
-      const res = await axios.get(`${API_URL}/api/student/institutions`);
+      // Single call to load complete academic hierarchy
+      const res = await api.get('/api/academic/hierarchy');
       if (res.data.ok) {
-        setUniversities(res.data.universities);
-        setDepartments(res.data.departments);
-        setBatches(res.data.batches);
+        setUniversities(res.data.universities || []);
+        setFaculties(res.data.faculties || []);
+        setDepartments(res.data.departments || []);
+        setBatches(res.data.batches || []);
       }
     } catch (err) {
       console.error(err);
@@ -88,8 +82,10 @@ const LimboPage = () => {
     }
   };
 
-  const filteredDepts = departments.filter(d => d.uni_code === selectedUni);
-  const filteredBatches = batches.filter(b => b.dept_id === parseInt(selectedDept));
+  // Safe string-based cascading filters
+  const filteredFaculties = faculties.filter(f => String(f.university_id) === String(selectedUni));
+  const filteredDepts     = departments.filter(d => String(d.faculty_id) === String(selectedFaculty));
+  const filteredBatches   = batches.filter(b => String(b.department_id) === String(selectedDept));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -101,13 +97,9 @@ const LimboPage = () => {
 
     setSubmitting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token || localStorage.getItem('supabase.auth.token');
-
-      const res = await axios.post(
-        `${API_URL}/api/student/join-batch`,
-        { batchId: parseInt(selectedBatch), regNo: regNo.trim(), message: message.trim() || undefined },
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await api.post(
+        '/api/student/join-batch',
+        { batchId: parseInt(selectedBatch), regNo: regNo.trim(), message: message.trim() || undefined }
       );
 
       if (res.data.ok) {
@@ -127,25 +119,33 @@ const LimboPage = () => {
     navigate('/login');
   };
 
+  const fieldInputClass = `w-full appearance-none px-4 py-3.5 pr-10 border-2 rounded-xl text-sm font-bold transition-all outline-none disabled:opacity-40 disabled:bg-slate-100 dark:disabled:bg-slate-900 disabled:cursor-not-allowed ${
+    isDarkMode 
+      ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/20' 
+      : 'bg-white border-slate-300 text-slate-900 focus:border-teal-600 focus:ring-4 focus:ring-teal-600/15 shadow-sm'
+  }`;
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <Loader2 className="w-12 h-12 animate-spin text-teal-400" />
+      <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
+        <Loader2 className="w-12 h-12 animate-spin text-teal-600 dark:text-teal-400" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      {/* Background glow */}
+    <div className={`min-h-screen flex items-center justify-center p-4 sm:p-6 relative ${isDarkMode ? 'bg-slate-950' : 'bg-gradient-to-br from-slate-100 via-teal-50/40 to-slate-200'}`}>
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-teal-500/20 blur-[120px]"></div>
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-500/20 blur-[120px]"></div>
       </div>
 
-      <div className="bg-white max-w-[520px] w-full p-10 rounded-3xl shadow-2xl relative z-10 border border-slate-100">
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+      <div className={`max-w-[540px] w-full p-8 sm:p-10 rounded-3xl relative z-10 border transition-all ${
+        isDarkMode 
+          ? 'bg-slate-900/95 border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.5)]' 
+          : 'bg-white/95 border-slate-200 shadow-[0_15px_45px_rgba(15,23,42,0.12)]'
+      }`}>
+        <div className="flex items-center gap-4 mb-6">
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg ${
             rejectedRequest || removedRequest
               ? 'bg-gradient-to-br from-red-500 to-red-400 shadow-red-500/30' 
@@ -154,22 +154,21 @@ const LimboPage = () => {
             <BookOpen className="w-7 h-7 text-white" />
           </div>
           <div>
-            <h1 className="font-serif text-2xl font-bold text-slate-800">
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               {removedRequest ? 'Removed From Batch' : rejectedRequest ? 'Application Rejected' : (pendingRequest || submitted ? 'Request Pending' : 'Join Your Batch')}
             </h1>
-            <p className="text-slate-500 text-sm">StudyEase — Academic Platform</p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold mt-0.5">StudyEase — Academic Management</p>
           </div>
         </div>
 
-        {/* REJECTED OR REMOVED STATE */}
         {rejectedRequest || removedRequest ? (
           <div className="text-center space-y-6">
-            <div className="p-8 bg-red-50 rounded-2xl border border-red-100">
-              <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-red-700 mb-2">
+            <div className="p-8 bg-red-50/90 dark:bg-red-950/30 rounded-2xl border border-red-200 dark:border-red-900/50">
+              <AlertCircle className="w-16 h-16 text-red-600 dark:text-red-400 mx-auto mb-4" />
+              <h2 className="text-2xl font-black text-red-800 dark:text-red-300 mb-2">
                 {removedRequest ? 'Removed From Batch' : 'Application Rejected'}
               </h2>
-              <p className="text-slate-600 leading-relaxed">
+              <p className="text-slate-700 dark:text-slate-300 font-semibold leading-relaxed">
                 {removedRequest 
                   ? <>You have been removed from your batch by the Class Representative.<br />You can apply again to regain access.</>
                   : <>Your request to join the batch was rejected by the Class Representative.<br />Please verify your information and try applying again.</>
@@ -179,155 +178,224 @@ const LimboPage = () => {
             
             <button
               onClick={() => { setRejectedRequest(null); setRemovedRequest(null); setError(''); }}
-              className="w-full py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+              className="w-full py-4 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl font-black hover:from-red-700 hover:to-red-600 transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
               Apply Again
             </button>
             <button
               onClick={handleLogout}
-              className="w-full py-4 rounded-xl font-semibold text-slate-500 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 border-2 border-slate-200"
+              className="w-full py-4 rounded-xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 border-2 border-slate-300 dark:border-slate-700 cursor-pointer"
             >
               <LogOut className="w-4 h-4" /> Sign Out
             </button>
           </div>
         ) : (pendingRequest || submitted) ? (
           <div className="text-center space-y-6">
-            <div className="p-8 bg-violet-50 rounded-2xl border border-violet-100">
-              <Hourglass className="w-16 h-16 text-violet-500 mx-auto mb-4 animate-pulse" />
-              <h2 className="text-2xl font-bold text-violet-700 mb-2">Awaiting Approval</h2>
-              <p className="text-slate-600 leading-relaxed">
+            <div className="p-8 bg-violet-50/90 dark:bg-violet-950/30 rounded-2xl border border-violet-200 dark:border-violet-900/50">
+              <Hourglass className="w-16 h-16 text-violet-600 dark:text-violet-400 mx-auto mb-4 animate-pulse" />
+              <h2 className="text-2xl font-black text-violet-800 dark:text-violet-300 mb-2">Awaiting Approval</h2>
+              <p className="text-slate-700 dark:text-slate-300 font-semibold leading-relaxed">
                 Your request to join the batch has been submitted.<br />
                 Please wait for your <strong>Class Representative (CR)</strong> to review and approve it.
               </p>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-left space-y-2">
-              <p className="text-sm font-bold text-slate-500 uppercase tracking-wider">What happens next?</p>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <CheckCircle className="w-4 h-4 text-teal-500 shrink-0" />
+            <div className="p-5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 text-left space-y-3">
+              <p className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">What happens next?</p>
+              <div className="flex items-center gap-3 text-sm font-bold text-slate-800 dark:text-slate-200">
+                <CheckCircle className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 Your CR will review your registration number
               </div>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <CheckCircle className="w-4 h-4 text-teal-500 shrink-0" />
+              <div className="flex items-center gap-3 text-sm font-bold text-slate-800 dark:text-slate-200">
+                <CheckCircle className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 Once approved, you'll get full dashboard access
               </div>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <CheckCircle className="w-4 h-4 text-teal-500 shrink-0" />
+              <div className="flex items-center gap-3 text-sm font-bold text-slate-800 dark:text-slate-200">
+                <CheckCircle className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 You'll be auto-enrolled in all batch courses
               </div>
             </div>
 
             <button
               onClick={handleLogout}
-              className="w-full py-4 rounded-xl font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center gap-2 border-2 border-slate-200 hover:border-slate-300"
+              className="w-full py-4 rounded-xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 border-2 border-slate-300 dark:border-slate-700 cursor-pointer"
             >
               <LogOut className="w-4 h-4" /> Sign Out
             </button>
           </div>
         ) : (
-          /* JOIN FORM */
+          /* JOIN FORM — 4-TIER CASCADING SELECT */
           <form onSubmit={handleSubmit} className="space-y-5">
-            <p className="text-slate-600 leading-relaxed pb-1 border-b border-slate-100">
-              Select your university, department, and batch below to request access.
+            <p className="text-slate-600 dark:text-slate-400 text-sm font-semibold leading-relaxed pb-3 border-b border-slate-200 dark:border-slate-800">
+              Select your university, faculty, department, and batch below to request access.
             </p>
 
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700">
+              <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl flex items-center gap-3 text-red-800 dark:text-red-300">
                 <AlertCircle className="w-5 h-5 shrink-0" />
-                <p className="text-sm font-medium">{error}</p>
+                <p className="text-sm font-bold">{error}</p>
               </div>
             )}
 
-            {/* University */}
-            <div className="space-y-2">
-              <label className="block font-semibold text-slate-700 text-sm">University</label>
-              <select
-                value={selectedUni}
-                onChange={e => { setSelectedUni(e.target.value); setSelectedDept(''); setSelectedBatch(''); }}
-                className="w-full px-4 py-4 border-2 border-slate-200 rounded-xl bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 transition-all outline-none"
-                required
-              >
-                <option value="">— Select University —</option>
-                {universities.map(u => (
-                  <option key={u.uni_code} value={u.uni_code}>{u.uni_name}</option>
-                ))}
-              </select>
+            {/* 1. University */}
+            <div className="space-y-1.5">
+              <label htmlFor="university-select" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                1. University <span className="text-teal-600 dark:text-teal-400">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  id="university-select"
+                  value={selectedUni}
+                  onChange={e => { 
+                    setSelectedUni(e.target.value); 
+                    setSelectedFaculty(''); 
+                    setSelectedDept(''); 
+                    setSelectedBatch(''); 
+                  }}
+                  className={fieldInputClass}
+                  required
+                >
+                  <option value="" className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">— Select University —</option>
+                  {universities.map(u => (
+                    <option key={u.id} value={u.id} className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">
+                      {u.university_name} ({u.university_code})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-5 h-5 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </div>
 
-            {/* Department */}
-            <div className="space-y-2">
-              <label className="block font-semibold text-slate-700 text-sm">Department</label>
-              <select
-                value={selectedDept}
-                onChange={e => { setSelectedDept(e.target.value); setSelectedBatch(''); }}
-                disabled={!selectedUni}
-                className="w-full px-4 py-4 border-2 border-slate-200 rounded-xl bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                required
-              >
-                <option value="">— Select Department —</option>
-                {filteredDepts.map(d => (
-                  <option key={d.dept_id} value={d.dept_id}>{d.dept_name} ({d.dept_code})</option>
-                ))}
-              </select>
+            {/* 2. Faculty */}
+            <div className="space-y-1.5">
+              <label htmlFor="faculty-select" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                2. Faculty <span className="text-teal-600 dark:text-teal-400">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  id="faculty-select"
+                  value={selectedFaculty}
+                  onChange={e => { 
+                    setSelectedFaculty(e.target.value); 
+                    setSelectedDept(''); 
+                    setSelectedBatch(''); 
+                  }}
+                  disabled={!selectedUni}
+                  className={fieldInputClass}
+                  required
+                >
+                  <option value="" className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">— Select Faculty —</option>
+                  {filteredFaculties.map(f => (
+                    <option key={f.id} value={f.id} className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">
+                      {f.faculty_name} {f.faculty_code ? `(${f.faculty_code})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-5 h-5 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </div>
 
-            {/* Batch */}
-            <div className="space-y-2">
-              <label className="block font-semibold text-slate-700 text-sm">Batch</label>
-              <select
-                value={selectedBatch}
-                onChange={e => setSelectedBatch(e.target.value)}
-                disabled={!selectedDept}
-                className="w-full px-4 py-4 border-2 border-slate-200 rounded-xl bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 transition-all outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                required
-              >
-                <option value="">— Select Batch —</option>
-                {filteredBatches.map(b => (
-                  <option key={b.batch_id} value={b.batch_id}>{b.batch_name}</option>
-                ))}
-              </select>
+            {/* 3. Department */}
+            <div className="space-y-1.5">
+              <label htmlFor="department-select" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                3. Department <span className="text-teal-600 dark:text-teal-400">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  id="department-select"
+                  value={selectedDept}
+                  onChange={e => { 
+                    setSelectedDept(e.target.value); 
+                    setSelectedBatch(''); 
+                  }}
+                  disabled={!selectedFaculty}
+                  className={fieldInputClass}
+                  required
+                >
+                  <option value="" className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">— Select Department —</option>
+                  {filteredDepts.map(d => (
+                    <option key={d.id} value={d.id} className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">
+                      {d.department_name} ({d.department_code})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-5 h-5 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* 4. Batch */}
+            <div className="space-y-1.5">
+              <label htmlFor="batch-select" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                4. Batch <span className="text-teal-600 dark:text-teal-400">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  id="batch-select"
+                  value={selectedBatch}
+                  onChange={e => setSelectedBatch(e.target.value)}
+                  disabled={!selectedDept}
+                  className={fieldInputClass}
+                  required
+                >
+                  <option value="" className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">— Select Batch —</option>
+                  {filteredBatches.map(b => (
+                    <option key={b.id} value={b.id} className="text-slate-900 bg-white dark:bg-slate-900 dark:text-white font-bold">
+                      {b.batch_name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-5 h-5 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </div>
 
             {/* Registration Number */}
-            <div className="space-y-2">
-              <label className="block font-semibold text-slate-700 text-sm">Registration Number</label>
+            <div className="space-y-1.5">
+              <label htmlFor="regno-input" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                Registration Number <span className="text-teal-600 dark:text-teal-400">*</span>
+              </label>
               <input
+                id="regno-input"
                 type="text"
                 placeholder="e.g. 2021-1-60-001"
                 value={regNo}
                 onChange={e => setRegNo(e.target.value)}
-                className="w-full px-4 py-4 border-2 border-slate-200 rounded-xl bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 transition-all outline-none"
+                className={fieldInputClass}
                 required
               />
             </div>
 
             {/* Optional message */}
-            <div className="space-y-2">
-              <label className="block font-semibold text-slate-700 text-sm">Message to CR <span className="text-slate-400 font-normal">(optional)</span></label>
+            <div className="space-y-1.5">
+              <label htmlFor="message-input" className="block font-black text-slate-700 dark:text-slate-300 text-xs uppercase tracking-wider">
+                Message to CR <span className="text-slate-400 font-medium lowercase">(optional)</span>
+              </label>
               <textarea
+                id="message-input"
                 placeholder="Any note to your CR..."
                 value={message}
                 onChange={e => setMessage(e.target.value)}
                 rows={2}
-                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-white focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10 transition-all outline-none resize-none"
+                className={`${fieldInputClass} resize-none`}
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full px-7 py-4 bg-gradient-to-r from-teal-600 to-teal-400 text-white rounded-2xl text-lg font-semibold cursor-pointer transition-all duration-300 flex items-center justify-center gap-3 hover:-translate-y-1 hover:shadow-[0_15px_40px_rgba(13,148,136,0.4)] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Apply to Join <ArrowRight className="w-5 h-5" /></>}
-            </button>
+            <div className="pt-2 space-y-3">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full px-7 py-4 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-2xl text-base font-black cursor-pointer transition-all duration-300 flex items-center justify-center gap-3 hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(13,148,136,0.4)] disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+              >
+                {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Apply to Join <ArrowRight className="w-5 h-5" /></>}
+              </button>
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="w-full py-4 rounded-xl font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors flex items-center justify-center gap-2 border-2 border-transparent hover:border-slate-200"
-            >
-              <LogOut className="w-4 h-4" /> Sign Out
-            </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full py-3.5 rounded-xl font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 border-2 border-slate-300 dark:border-slate-700 cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" /> Sign Out
+              </button>
+            </div>
           </form>
         )}
       </div>

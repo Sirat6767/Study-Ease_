@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Users, Loader2, AlertCircle, Crown, GraduationCap, Trash2 } from 'lucide-react';
-import axios from 'axios';
+import api from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import ConfirmModal from '../ui/ConfirmModal';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const getToken = async () => {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.access_token || localStorage.getItem('supabase.auth.token');
 };
 
-const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
+const BatchPanel = ({ userRole, academicData }) => {
+  const { isDarkMode } = useTheme();
   const [members, setMembers]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error,   setError]     = useState('');
@@ -22,14 +24,13 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
     setLoading(true); setError('');
     try {
       const token   = await getToken();
-      const headers = { Authorization: `Bearer ${token}` };
 
       // CRs use the CR endpoint; students use the student endpoint
       const url = userRole === 'cr'
-        ? `${API}/api/cr/batch-members`
-        : `${API}/api/student/batch-members`;
+        ? '/api/cr/batch-members'
+        : '/api/student/batch-members';
 
-      const res = await axios.get(url, { headers });
+      const res = await api.get(url);
       if (res.data.ok) setMembers(res.data.members);
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load batch members.');
@@ -41,10 +42,7 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
   const handleRemove = async () => {
     if (!confirmModal) return;
     try {
-      const token = await getToken();
-      const res = await axios.delete(`${API}/api/cr/students/${confirmModal.studentId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.delete(`/api/cr/students/${confirmModal.studentId}`);
       if (res.data.ok) {
         setMembers(prev => prev.filter(m => m.userId !== confirmModal.studentId));
         setConfirmModal(null);
@@ -55,77 +53,83 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
     }
   };
 
-  const card    = isDarkMode ? 'bg-slate-900 border-slate-800'  : 'bg-white border-white/80 shadow-md';
-  const rowBase = isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200';
-  const crRow   = isDarkMode ? 'bg-teal-900/30 border-teal-700/50' : 'bg-teal-50 border-teal-200';
+  const card    = `card-modern ${isDarkMode ? 'card-dark' : 'card-light'} p-8`;
+  const rowBase = isDarkMode ? 'list-row-dark' : 'list-row-light';
+  const crRow   = isDarkMode ? 'bg-teal-900/20 border-teal-700/30' : 'bg-teal-50/80 border-teal-200 shadow-xs';
 
   const totalMembers = members.length;
   const cr = members.find(m => m.isCR);
   const students = members.filter(m => !m.isCR);
 
   return (
-    <div className={`p-8 rounded-3xl border ${card}`}>
+    <div className={card}>
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
-        <h2 className="text-2xl font-bold flex items-center gap-3 text-teal-600 dark:text-teal-400">
+        <h2 className="text-2xl font-black flex items-center gap-3 text-teal-700 dark:text-teal-400">
           <span className="text-3xl">🏫</span> My Batch
         </h2>
         {academicData && (
           <div className="text-right">
-            <p className="font-bold text-slate-700 dark:text-slate-200">{academicData.batchName}</p>
-            <p className="text-sm text-slate-500">{academicData.deptCode} · {academicData.uniName}</p>
+            <p className="font-extrabold text-slate-900 dark:text-slate-100">{academicData.batchName}</p>
+            <p className="text-sm font-bold text-slate-700 dark:text-slate-300">{academicData.deptCode} · {academicData.uniName}</p>
           </div>
         )}
       </div>
 
       {/* Stats Bar */}
-      <div className={`flex items-center gap-6 p-4 rounded-2xl mb-8 border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-        <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-teal-500" />
+      <div className={`flex flex-wrap items-center gap-6 p-5 rounded-2xl mb-8 border ${isDarkMode ? 'stats-bar-dark' : 'stats-bar-light'}`}>
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-400 shadow-xs border border-teal-200/80 dark:border-teal-700/50">
+            <Users className="w-5 h-5" />
+          </div>
           <div>
-            <p className="text-xl font-black text-slate-800 dark:text-white">{totalMembers}</p>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Total Members</p>
+            <p className="text-2xl font-black text-slate-950 dark:text-white tracking-tight">{totalMembers}</p>
+            <p className="text-xs text-slate-800 dark:text-slate-300 font-extrabold uppercase tracking-wider">Total Members</p>
           </div>
         </div>
-        <div className="w-px h-10 bg-slate-200 dark:bg-slate-700" />
-        <div className="flex items-center gap-2">
-          <Crown className="w-5 h-5 text-amber-500" />
+        <div className="w-px h-10 bg-slate-300 dark:bg-slate-700" />
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400 shadow-xs border border-amber-200/80 dark:border-amber-700/50">
+            <Crown className="w-5 h-5" />
+          </div>
           <div>
-            <p className="font-bold text-slate-800 dark:text-white">{cr?.name || 'Unassigned'}</p>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Class Representative</p>
+            <p className="text-lg font-bold text-slate-950 dark:text-white">{cr?.name || 'Unassigned'}</p>
+            <p className="text-xs text-slate-800 dark:text-slate-300 font-extrabold uppercase tracking-wider">Class Representative</p>
           </div>
         </div>
-        <div className="w-px h-10 bg-slate-200 dark:bg-slate-700" />
-        <div className="flex items-center gap-2">
-          <GraduationCap className="w-5 h-5 text-indigo-500" />
+        <div className="w-px h-10 bg-slate-300 dark:bg-slate-700" />
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-400 shadow-xs border border-indigo-200/80 dark:border-indigo-700/50">
+            <GraduationCap className="w-5 h-5" />
+          </div>
           <div>
-            <p className="text-xl font-black text-slate-800 dark:text-white">{students.length}</p>
-            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Students</p>
+            <p className="text-2xl font-black text-slate-950 dark:text-white tracking-tight">{students.length}</p>
+            <p className="text-xs text-slate-800 dark:text-slate-300 font-extrabold uppercase tracking-wider">Students</p>
           </div>
         </div>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-red-700 text-sm">
-          <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+        <div className="mb-4 p-4 bg-red-50/90 border border-red-200 rounded-xl flex items-center gap-3 text-red-800 text-sm font-semibold shadow-2xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-600" /> {error}
         </div>
       )}
 
       {/* Loading */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-8 h-8 animate-spin text-teal-500" />
+          <Loader2 className="w-8 h-8 animate-spin text-teal-600 dark:text-teal-400" />
         </div>
       ) : members.length === 0 ? (
-        <div className={`p-12 rounded-2xl text-center border-2 border-dashed ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
-          <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 font-semibold">No members found in this batch.</p>
+        <div className={`p-12 rounded-2xl text-center border-2 border-dashed ${isDarkMode ? 'border-slate-700' : 'border-slate-300 bg-slate-50/50'}`}>
+          <Users className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+          <p className="text-slate-700 dark:text-slate-300 font-semibold">No members found in this batch.</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {/* Column headers */}
-          <div className="grid grid-cols-12 px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+          <div className="grid grid-cols-12 px-4 py-2 text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
             <span className="col-span-1">#</span>
             <span className="col-span-6">Name</span>
             <span className="col-span-4">Registration No.</span>
@@ -135,39 +139,43 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
           {members.map((member, idx) => (
             <div
               key={member.userId}
-              className={`grid grid-cols-12 px-4 py-3 rounded-xl border items-center transition-all hover:shadow-sm ${
+              className={`grid grid-cols-12 px-4 py-3.5 rounded-xl border items-center transition-all ${
                 member.isCR ? crRow : rowBase
               }`}
             >
               {/* Index */}
-              <span className={`col-span-1 text-sm font-bold ${member.isCR ? 'text-teal-500' : 'text-slate-400'}`}>
+              <span className={`col-span-1 text-sm font-bold ${member.isCR ? 'text-teal-700 dark:text-teal-400' : 'text-slate-700 dark:text-slate-300'}`}>
                 {idx + 1}
               </span>
 
               {/* Name + CR badge */}
-              <div className="col-span-6 flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                  member.isCR
-                    ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-white'
-                    : isDarkMode
-                      ? 'bg-slate-700 text-slate-300'
-                      : 'bg-slate-200 text-slate-600'
-                }`}>
-                  {member.name?.charAt(0)?.toUpperCase() || '?'}
-                </div>
-                <span className={`font-semibold truncate ${member.isCR ? 'text-teal-600 dark:text-teal-400' : ''}`}>
+              <div className="col-span-6 flex items-center gap-3">
+                {member.avatarUrl ? (
+                  <img src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${member.avatarUrl}`} alt="Avatar" className="w-9 h-9 rounded-full object-cover shrink-0 border border-slate-300 dark:border-slate-700 shadow-2xs" />
+                ) : (
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0 shadow-2xs ${
+                    member.isCR
+                      ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-white'
+                      : isDarkMode
+                        ? 'bg-slate-700 text-slate-300'
+                        : 'bg-slate-200 text-slate-800 border border-slate-300'
+                  }`}>
+                    {member.name?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                )}
+                <span className={`font-bold truncate ${member.isCR ? 'text-teal-800 dark:text-teal-300' : 'text-slate-900 dark:text-slate-100'}`}>
                   {member.name}
                 </span>
                 {member.isCR && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold shrink-0">
-                    <Crown className="w-3 h-3" /> CR
+                  <span className="badge-cr flex items-center gap-1 shrink-0">
+                    <Crown className="w-3 h-3 text-amber-500" /> CR
                   </span>
                 )}
               </div>
 
               {/* Reg No */}
               <span className={`col-span-4 font-mono text-sm ${
-                member.isCR ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-500'
+                member.isCR ? 'text-teal-800 dark:text-teal-400 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'
               }`}>
                 {member.regNo || '—'}
               </span>
@@ -178,7 +186,7 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
                   {!member.isCR && (
                     <button
                       onClick={() => setConfirmModal({ studentId: member.userId, studentName: member.name })}
-                      className="p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                      className="p-1.5 text-red-500 hover:bg-red-100/70 hover:text-red-700 dark:hover:bg-red-500/20 rounded-lg transition-colors"
                       title="Remove student"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -191,38 +199,17 @@ const BatchPanel = ({ isDarkMode, userRole, academicData }) => {
         </div>
       )}
 
-      {/* Confirmation Modal */}
-      {confirmModal && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className={`w-full max-w-sm rounded-2xl shadow-2xl p-8 text-center ${
-            isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white'
-          }`}>
-            <div className="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="w-7 h-7 text-red-500" />
-            </div>
-            <h3 className="text-xl font-black mb-2">Remove Student?</h3>
-            <p className="text-slate-500 text-sm mb-6">
-              Are you sure you want to remove <span className="font-bold text-slate-700 dark:text-slate-300">{confirmModal.studentName}</span> from the batch?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmModal(null)}
-                className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRemove}
-                className="flex-1 py-3 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={!!confirmModal}
+        title="Remove Student?"
+        message={`Are you sure you want to remove ${confirmModal?.studentName} from the batch?`}
+        onConfirm={handleRemove}
+        onCancel={() => setConfirmModal(null)}
+        type="danger"
+      />
     </div>
   );
 };
 
 export default BatchPanel;
+

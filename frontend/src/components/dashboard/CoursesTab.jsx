@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import { BookOpen, FileText, Link, Plus, Trash2, Pencil, Loader2, X, AlertCircle, Check } from 'lucide-react';
-import axios from 'axios';
+import api, { downloadSecureFile } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+import ConfirmModal from '../ui/ConfirmModal';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const getToken = async () => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -33,19 +34,16 @@ const ComponentModal = ({ enrollmentId, courseId, existing, onClose, onSaved }) 
     if (!name.trim() || maxMarks === '' || obtained === '') return;
     setSaving(true); setError('');
     try {
-      const token = await getToken();
       if (isEdit) {
-        const res = await axios.put(
-          `${API_URL}/api/student/components/${existing.id}`,
-          { enrollmentId, type, name: name.trim(), maxMarks: Number(maxMarks), obtained: Number(obtained) },
-          { headers: { Authorization: `Bearer ${token}` } }
+        const res = await api.put(
+          `/api/student/components/${existing.id}`,
+          { enrollmentId, type, name: name.trim(), maxMarks: Number(maxMarks), obtained: Number(obtained) }
         );
         onSaved(res.data.component, 'edit');
       } else {
-        const res = await axios.post(
-          `${API_URL}/api/student/components`,
-          { enrollmentId, courseId, type, name: name.trim(), maxMarks: Number(maxMarks), obtained: Number(obtained) },
-          { headers: { Authorization: `Bearer ${token}` } }
+        const res = await api.post(
+          `/api/student/components`,
+          { enrollmentId, courseId, type, name: name.trim(), maxMarks: Number(maxMarks), obtained: Number(obtained) }
         );
         onSaved(res.data.component, 'add');
       }
@@ -134,12 +132,14 @@ const ComponentModal = ({ enrollmentId, courseId, existing, onClose, onSaved }) 
 };
 
 // ── CoursesTab ──────────────────────────────────────────────────────────────
-const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFiles = [] }) => {
+const CoursesTab = ({ enrollments: initialEnrollments = [], courseFiles = [] }) => {
+  const { isDarkMode } = useTheme();
   const [enrollments, setEnrollments] = useState(initialEnrollments);
   const [activeCourse, setActiveCourse] = useState(initialEnrollments[0]?.courseId || null);
   const [modal, setModal] = useState(null); // null | { mode: 'add' | 'edit', component?: obj }
   const [deleting, setDeleting] = useState({});
   const [error, setError] = useState('');
+  const [deleteModal, setDeleteModal] = useState(null); // { id, name }
 
   if (enrollments.length === 0) {
     return (
@@ -178,22 +178,22 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
   const totalPct      = totalMax > 0 ? Math.round((totalObtained / totalMax) * 100) : null;
 
   // ── Delete component ─────────────────────────────────────────────────────
-  const handleDelete = async (comp) => {
-    if (!confirm(`Delete "${comp.name}"?`)) return;
+  const confirmDeleteComponent = async () => {
+    if (!deleteModal) return;
+    const comp = deleteModal;
     setDeleting(d => ({ ...d, [comp.id]: true }));
     setError('');
     try {
-      const token = await getToken();
-      await axios.delete(`${API_URL}/api/student/components/${comp.id}/enrollment/${selectedEnrollment.enrollId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.delete(`/api/student/components/${comp.id}/enrollment/${selectedEnrollment.enrollId}`);
       setEnrollments(prev => prev.map(e =>
         e.courseId === activeCourse
           ? { ...e, components: e.components.filter(c => c.id !== comp.id) }
           : e
       ));
+      setDeleteModal(null);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete component.');
+      setDeleteModal(null);
     } finally {
       setDeleting(d => ({ ...d, [comp.id]: false }));
     }
@@ -211,8 +211,8 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
     }));
   };
 
-  const card = isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-white/80 shadow-md';
-  const compCard = isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200';
+  const card = `card-modern ${isDarkMode ? 'card-dark' : 'card-light'}`;
+  const compCard = isDarkMode ? 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-800 transition-colors' : 'bg-white border-slate-200 shadow-sm hover:shadow-md hover:border-teal-200 transition-all';
 
   return (
     <>
@@ -228,12 +228,10 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
 
       {/* ── Overall CGPA Banner ─────────────────────────────────────────── */}
       {overallPct !== null && (
-        <div className={`mb-6 p-6 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-4 ${
-          isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-white/80 shadow-md'
-        }`}>
+        <div className={`mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 ${card} ${!isDarkMode ? 'border-l-4 border-l-teal-500' : ''}`}>
           <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Overall Grade (Credit Weighted)</p>
-            <p className="text-sm text-slate-500">
+            <p className="text-xs font-black text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Overall Grade (Credit Weighted)</p>
+            <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
               Calculated across {enrollments.filter(e => (e.components?.length || 0) > 0).length} of {enrollments.length} courses
               · {cgpaData.totalCredits} graded credits
             </p>
@@ -242,10 +240,10 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
             {/* Progress ring-style display */}
             <div className="flex flex-col items-center">
               <span className={`text-5xl font-black ${scoreColor(overallPct)}`}>{overallPct}%</span>
-              <span className="text-xs text-slate-400 font-semibold mt-1">Overall</span>
+              <span className="text-xs text-slate-500 font-bold mt-1">Overall</span>
             </div>
             <div className="w-48">
-              <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <div className="flex justify-between text-xs font-bold text-slate-500 mb-1">
                 <span>0%</span><span>50%</span><span>100%</span>
               </div>
               <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
@@ -259,9 +257,9 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
                 />
               </div>
               <div className="flex justify-between text-xs mt-1">
-                <span className="text-red-400 font-semibold">Fail</span>
-                <span className="text-amber-400 font-semibold">Average</span>
-                <span className="text-teal-500 font-semibold">Good</span>
+                <span className="text-red-500 font-bold">Fail</span>
+                <span className="text-amber-500 font-bold">Average</span>
+                <span className="text-teal-600 font-bold">Good</span>
               </div>
             </div>
           </div>
@@ -271,19 +269,21 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* ── Sidebar ─────────────────────────────────────────────────────── */}
         <div className="lg:col-span-1 space-y-2">
-          <h3 className="font-bold text-slate-500 uppercase tracking-wider text-xs mb-4 ml-2">Enrolled Courses</h3>
-          {enrollments.map(course => (
+          <h3 className="font-extrabold text-slate-600 dark:text-slate-400 uppercase tracking-wider text-xs mb-4 ml-2">Enrolled Courses</h3>
+          {[...enrollments].sort((a, b) => a.code.localeCompare(b.code)).map(course => (
             <button
               key={course.courseId}
               onClick={() => setActiveCourse(course.courseId)}
               className={`w-full text-left px-4 py-3 rounded-xl transition-all ${
                 activeCourse === course.courseId
-                  ? 'bg-gradient-to-r from-teal-600 to-teal-400 text-white shadow-md'
-                  : `text-slate-600 hover:bg-slate-100 ${isDarkMode ? 'bg-slate-900/50' : 'bg-white/50'}`
+                  ? 'bg-gradient-to-r from-teal-600 to-teal-500 text-white shadow-md font-bold'
+                  : isDarkMode
+                    ? 'text-slate-400 bg-slate-900/50 hover:bg-slate-800'
+                    : 'text-slate-800 bg-white border border-slate-200/90 hover:border-teal-400 hover:bg-teal-50/70 hover:text-teal-900 shadow-2xs font-semibold'
               }`}
             >
-              <p className="font-bold">{course.code}</p>
-              <p className={`text-xs truncate ${activeCourse === course.courseId ? 'text-teal-50' : 'text-slate-500'}`}>
+              <p className="font-extrabold">{course.code}</p>
+              <p className={`text-xs truncate ${activeCourse === course.courseId ? 'text-teal-50' : 'text-slate-600 dark:text-slate-400 font-medium'}`}>
                 {course.title}
               </p>
             </button>
@@ -293,7 +293,7 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
         {/* ── Main Content ─────────────────────────────────────────────────── */}
         <div className="lg:col-span-3 space-y-8">
           {/* Grades Card */}
-          <div className={`p-8 rounded-3xl border ${card}`}>
+          <div className={card}>
             <div className="flex justify-between items-start mb-6">
               <div>
                 <h2 className="text-2xl font-bold flex items-center gap-3">
@@ -335,14 +335,16 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
                           onClick={() => setModal({ mode: 'edit', component: comp })}
                           className="p-1.5 rounded-lg bg-white text-slate-400 hover:text-teal-600 hover:bg-teal-50 shadow-sm transition-colors"
                           title="Edit"
+                          aria-label={`Edit ${comp.name}`}
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => handleDelete(comp)}
+                          onClick={() => setDeleteModal(comp)}
                           disabled={deleting[comp.id]}
                           className="p-1.5 rounded-lg bg-white text-slate-400 hover:text-red-600 hover:bg-red-50 shadow-sm transition-colors"
                           title="Delete"
+                          aria-label={`Delete ${comp.name}`}
                         >
                           {deleting[comp.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                         </button>
@@ -383,19 +385,17 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
           </div>
 
           {/* Course Materials */}
-          <div className={`p-8 rounded-3xl border ${card}`}>
+          <div className={card}>
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
               <span className="text-3xl">📁</span> Course Materials
             </h2>
             {filesForCourse.length > 0 ? (
               <div className="space-y-3">
                 {filesForCourse.map(file => (
-                  <a
+                  <button
                     key={file.id}
-                    href={file.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all group ${
+                    onClick={() => downloadSecureFile(file.url, file.name)}
+                    className={`w-full text-left flex items-center justify-between p-4 rounded-2xl border transition-all group ${
                       isDarkMode
                         ? 'bg-slate-800/50 border-slate-700 hover:border-teal-500/50'
                         : 'bg-slate-50 border-slate-200 hover:border-teal-400 hover:shadow-sm'
@@ -412,7 +412,7 @@ const CoursesTab = ({ isDarkMode, enrollments: initialEnrollments = [], courseFi
                         <p className="text-xs text-slate-500 capitalize">{file.type}</p>
                       </div>
                     </div>
-                  </a>
+                  </button>
                 ))}
               </div>
             ) : (

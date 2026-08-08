@@ -1,15 +1,7 @@
 import { X, Crown } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
+import AcademicBreadcrumb from '../ui/AcademicBreadcrumb';
 
-/**
- * Shared user info popup — used by AdminPanel (Load Info) and UniversityExplorer (click student).
- * Expects `user` shape:
- *   { id, email, role, created_at,
- *     personal_info: [{ name, father_name, mother_name, contact_no, address }],
- *     academic_info: [{ reg_no, batches: { batch_name, departments: { dept_code, uni_code } } }]
- *   }
- * OR a lightweight user from overview:
- *   { id, email, role, name, batchId }
- */
 const ROLE_STYLE = {
   admin:               'bg-red-100    text-red-600',
   cr:                  'bg-teal-100   text-teal-600',
@@ -27,19 +19,21 @@ const Row = ({ label, value, mono = false }) => {
   );
 };
 
-const Section = ({ title, children, isDarkMode }) => (
-  <div className={`p-4 rounded-2xl space-y-2.5 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{title}</p>
-    {children}
-  </div>
-);
+const Section = ({ title, children }) => {
+  const { isDarkMode } = useTheme();
+  return (
+    <div className={`p-4 rounded-2xl space-y-2.5 ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{title}</p>
+      {children}
+    </div>
+  );
+};
 
-const UserInfoModal = ({ user, isDarkMode, onClose }) => {
+const UserInfoModal = ({ user, onClose }) => {
+  const { isDarkMode } = useTheme();
   if (!user) return null;
 
-  // Normalize — supports both full (admin getUserInfo) and lightweight (overview user) shapes
   const pi  = user.personal_info?.[0] || {};
-  const ai  = user.academic_info?.[0]  || {};
   const name = pi.name || user.name || null;
   const role = user.role;
   const avatar = (name || user.email || '?').charAt(0).toUpperCase();
@@ -76,7 +70,7 @@ const UserInfoModal = ({ user, isDarkMode, onClose }) => {
         {/* ── Body ── */}
         <div className="px-8 py-6 space-y-4 max-h-[60vh] overflow-y-auto">
           {/* Account */}
-          <Section title="Account" isDarkMode={isDarkMode}>
+          <Section title="Account">
             <Row label="Email"  value={user.email} />
             {user.created_at && (
               <Row label="Joined" value={new Date(user.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} />
@@ -84,16 +78,13 @@ const UserInfoModal = ({ user, isDarkMode, onClose }) => {
           </Section>
 
           {/* Personal Info */}
-          <Section title="Personal Info" isDarkMode={isDarkMode}>
+          <Section title="Personal Info">
             {pi.name || pi.father_name || pi.mother_name || pi.contact_no || pi.address ? (
               <>
                 <Row label="Father's Name" value={pi.father_name} />
                 <Row label="Mother's Name" value={pi.mother_name} />
                 <Row label="Contact"       value={pi.contact_no} />
                 <Row label="Address"       value={pi.address} />
-                {!pi.father_name && !pi.mother_name && !pi.contact_no && !pi.address && (
-                  <p className="text-sm text-slate-400 italic">No details provided.</p>
-                )}
               </>
             ) : (
               <p className="text-sm text-slate-400 italic">No personal info on file.</p>
@@ -101,22 +92,12 @@ const UserInfoModal = ({ user, isDarkMode, onClose }) => {
           </Section>
 
           {/* Academic Info */}
-          <Section title="Academic Info" isDarkMode={isDarkMode}>
-            {ai.reg_no || ai.batches ? (
-              <>
-                <Row label="Reg No" value={ai.reg_no} mono />
-                {ai.batches && (
-                  <>
-                    <Row label="Batch" value={ai.batches.batch_name} />
-                    {ai.batches.departments && (
-                      <>
-                        <Row label="Dept"       value={ai.batches.departments.dept_code} />
-                        <Row label="University" value={ai.batches.departments.uni_code} />
-                      </>
-                    )}
-                  </>
-                )}
-              </>
+          <Section title="Academic Context">
+            {user.academic ? (
+              <div className="space-y-2">
+                <AcademicBreadcrumb academic={user.academic} isDarkMode={isDarkMode} />
+                {user.academic.regNo && <Row label="Reg No" value={user.academic.regNo} mono />}
+              </div>
             ) : (
               <p className="text-sm text-slate-400 italic">No academic info on file.</p>
             )}

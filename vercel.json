@@ -1,6 +1,4 @@
 {
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -13,6 +11,30 @@
     {
       "source": "/((?!api|uploads).*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/api(/.*)?",
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "frontend"
+      }
     }
-  ]
+  ],
+  "services": {
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "server.js"
+    }
+  }
 }
